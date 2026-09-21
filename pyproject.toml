@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "haidian-gep"
+version = "0.1.0"
+description = "Haidian 2024 GEP reference-data workbench and review example"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+publish = ["modelscope-hub==0.4.3"]
+
+[project.scripts]
+haidian-gep = "gep.__main__:main"
+
+[tool.setuptools]
+packages = ["gep"]

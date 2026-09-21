@@ -1,0 +1,12 @@
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+cryptography==50.0.1
+filelock==4.0.1
+# haidian-gep 0.1.0 installed from this repository
+idna==3.20
+modelscope-hub==0.4.3
+pycparser==3.0
+requests==2.34.2
+tqdm==4.70.1
+urllib3==2.8.0
