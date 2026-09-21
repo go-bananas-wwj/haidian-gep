@@ -1,0 +1,9 @@
+{
+  "method": "stock_survival",
+  "stock_count": 100000,
+  "survival": 0.8,
+  "weight_kg": 0.75,
+  "harvest_fraction": 1,
+  "evidence": "synthetic_training/example; these are not observed Haidian values",
+  "operator": "analyst"
+}

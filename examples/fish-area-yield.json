@@ -1,0 +1,7 @@
+{
+  "method": "area_yield",
+  "area_ha": 12,
+  "yield_t_ha": 5,
+  "evidence": "synthetic_training/example; these are not observed Haidian values",
+  "operator": "analyst"
+}
