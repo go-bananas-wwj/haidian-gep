@@ -830,6 +830,7 @@ class GepStore:
             "formal_gep_value_yuan": evaluation.formal_gep_value_yuan,
             "item_results": evaluation.item_results,
             "partial_category_totals_yuan": evaluation.partial_category_totals_yuan,
+            "adjustment_ledger": evaluation.adjustment_ledger,
             "blocking_nodes": evaluation.blocking_nodes,
         }
         status = "succeeded" if evaluation.formal_gep_value_yuan is not None else "blocked"

@@ -55,6 +55,39 @@ class FrozenRunTests(unittest.TestCase):
         self.assertIsNone(run.formal_gep_value_yuan)
         self.assertIn("adjustment_ledger:missing_or_unapproved", run.blocking_nodes)
 
+    def test_formal_total_applies_each_approved_total_level_adjustment_once(self):
+        nodes = [
+            {"node_key": "P1", "kind": "indicator", "category": "material", "applicability_status": "applicable"},
+            {"node_key": "P1.maize.quantity", "kind": "input", "parent_key": "P1", "value": 10, "unit": "t/a"},
+            {"node_key": "P1.maize.producer_price", "kind": "input", "parent_key": "P1", "value": 100, "unit": "元/t"},
+            {"node_key": "P1.maize.intermediate_cost", "kind": "input", "parent_key": "P1", "value": 0, "unit": "元/a"},
+            {"node_key": "P1.maize.labor", "kind": "input", "parent_key": "P1", "value": 0, "unit": "元/a"},
+            {"node_key": "P1.maize.depreciation", "kind": "input", "parent_key": "P1", "value": 0, "unit": "元/a"},
+            {"node_key": "P1.maize.tax_net", "kind": "input", "parent_key": "P1", "value": 0, "unit": "元/a"},
+            {"node_key": "P1.maize.capital_return", "kind": "input", "parent_key": "P1", "value": 0, "unit": "元/a"},
+        ]
+        nodes.extend(
+            {"node_key": card.indicator_id, "kind": "indicator", "category": "material", "applicability_status": "not_applicable"}
+            for card in method_cards() if card.indicator_id != "P1"
+        )
+        graph = {
+            "nodes": nodes,
+            "adjustment_ledger": {
+                "status": "approved",
+                "entries": [
+                    {"adjustment_id": "outside-1", "kind": "outside", "amount_yuan": 100,
+                     "booking_level": "total", "reason": "external source share"},
+                    {"adjustment_id": "already-in-p1", "kind": "overlap", "amount_yuan": 50,
+                     "booking_level": "item", "reason": "already netted in the P1 value"},
+                ],
+            },
+        }
+
+        run = evaluate_frozen_graph(graph)
+
+        self.assertEqual(run.partial_category_totals_yuan, {"material": 1_000})
+        self.assertEqual(run.formal_gep_value_yuan, 900)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
+from .formulas.adjustments import Adjustment, apply_adjustments
 from .formulas.registry import calculate_indicator
 from .methods import method_cards
 
@@ -15,6 +16,7 @@ class RunEvaluation:
     formal_gep_value_yuan: float | None
     item_results: Mapping[str, Mapping[str, Any]]
     partial_category_totals_yuan: Mapping[str, float]
+    adjustment_ledger: Mapping[str, Any] | None
     blocking_nodes: tuple[str, ...]
 
 
@@ -91,11 +93,39 @@ def evaluate_frozen_graph(graph: Mapping[str, Any]) -> RunEvaluation:
         else:
             blocking.extend(f"{card.indicator_id}:{field}" for field in result["blocking_fields"])
     adjustment_ledger = graph.get("adjustment_ledger")
+    ledger_summary: dict[str, Any] | None = None
+    formal_gep_value: float | None = None
     if not isinstance(adjustment_ledger, Mapping) or adjustment_ledger.get("status") != "approved":
         blocking.append("adjustment_ledger:missing_or_unapproved")
+    else:
+        entries = adjustment_ledger.get("entries")
+        if not isinstance(entries, list) or any(not isinstance(entry, Mapping) for entry in entries):
+            blocking.append("adjustment_ledger:invalid_entries")
+        else:
+            try:
+                adjustments = [
+                    Adjustment(
+                        str(entry.get("adjustment_id", "")), str(entry.get("kind", "")), entry.get("amount_yuan"),
+                        str(entry.get("booking_level", "")), str(entry.get("reason", "")),
+                    )
+                    for entry in entries
+                ]
+                applied = apply_adjustments(category_totals, adjustments)
+            except (TypeError, ValueError):
+                blocking.append("adjustment_ledger:invalid_entries")
+            else:
+                ledger_summary = {
+                    "gross_value_yuan": applied.gross_value_yuan,
+                    "total_adjustment_yuan": applied.total_adjustment_yuan,
+                    "applied_adjustment_ids": applied.applied_adjustment_ids,
+                    "already_booked_adjustment_ids": applied.already_booked_adjustment_ids,
+                }
+                if not blocking:
+                    formal_gep_value = applied.gep_value_yuan
     return RunEvaluation(
-        None if blocking else sum(category_totals.values()),
+        formal_gep_value,
         items,
         {category: value for category, value in category_totals.items() if value},
+        ledger_summary,
         tuple(sorted(blocking)),
     )
