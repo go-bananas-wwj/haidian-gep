@@ -54,6 +54,16 @@ class DemoApi:
                 body = self._json_body(environ)
                 task = self.store.create_task(**body)
                 return self._response(start_response, 201, task)
+            if method == "POST" and parts == ["runs"]:
+                body = self._json_body(environ)
+                run = self.store.create_run(**body)
+                return self._response(start_response, 202, run)
+            if len(parts) >= 2 and parts[0] == "runs":
+                run_id = parts[1]
+                if method == "GET" and not parts[2:]:
+                    return self._response(start_response, 200, self.store.run(run_id))
+                if method == "GET" and parts[2:] == ["chain"]:
+                    return self._response(start_response, 200, self.store.run_chain(run_id))
             if len(parts) >= 2 and parts[0] == "tasks":
                 task_id = parts[1]
                 if method == "GET" and parts[2:] == ["graph"]:

@@ -116,6 +116,46 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(first["status"], "blocked")
         self.assertIn("Dify", first["reason"])
 
+    def test_run_endpoint_records_a_blocked_run_from_a_frozen_snapshot(self):
+        """Break caught: the browser could not request the persisted run required by the task contract."""
+        self.app.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.app.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.app.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.app.store.connection.commit()
+        snapshot = self.app.store.create_snapshot(task["task_id"])
+
+        status, run, _ = self.request("POST", "/runs", {
+            "snapshot_id": snapshot["snapshot_id"], "idempotency_key": "run-request-1",
+        })
+
+        self.assertEqual(status, 202)
+        self.assertEqual(run["status"], "blocked")
+        self.assertTrue(run["run_id"])
+
+    def test_run_status_and_chain_are_readable(self):
+        """Break caught: a blocked run could not explain its immutable input chain after a refresh."""
+        self.app.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.app.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.app.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.app.store.connection.commit()
+        snapshot = self.app.store.create_snapshot(task["task_id"])
+        run = self.app.store.create_run(snapshot["snapshot_id"], "run-request-1")
+
+        status_code, status, _ = self.request("GET", f"/runs/{run['run_id']}")
+        chain_code, chain, _ = self.request("GET", f"/runs/{run['run_id']}/chain")
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(status["status"], "blocked")
+        self.assertEqual(chain_code, 200)
+        self.assertEqual(chain["snapshot_id"], snapshot["snapshot_id"])
+        self.assertEqual(len(chain["input_graph_sha256"]), 64)
+
     def test_root_serves_the_task_canvas(self):
         status, payload, headers = self.request("GET", "/")
 

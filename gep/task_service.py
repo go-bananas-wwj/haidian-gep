@@ -96,6 +96,12 @@ class GepStore:
                 data_version TEXT PRIMARY KEY, manifest_sha256 TEXT NOT NULL,
                 accepted INTEGER NOT NULL, registered_utc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+                parent_run_id TEXT REFERENCES runs(run_id), idempotency_key TEXT NOT NULL,
+                status TEXT NOT NULL, reason TEXT NOT NULL, chain_json TEXT NOT NULL,
+                created_utc TEXT NOT NULL, UNIQUE(snapshot_id, idempotency_key)
+            );
             """
         )
         self.connection.commit()
@@ -308,3 +314,49 @@ class GepStore:
             self.connection.execute("INSERT INTO snapshots VALUES (?,?,?,?)", (snapshot_id, task_id, graph_json, _utc_now()))
             self._event(task_id, None, "snapshot.created", {"snapshot_id": snapshot_id})
         return {"snapshot_id": snapshot_id}
+
+    def create_run(self, snapshot_id: str, idempotency_key: str) -> dict[str, str]:
+        """Record a deterministic-run request without fabricating a calculation result."""
+        if not idempotency_key.strip():
+            raise ValueError("idempotency_key is required")
+        snapshot = self.connection.execute(
+            "SELECT task_id,graph_json FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+        ).fetchone()
+        if snapshot is None:
+            raise KeyError("snapshot not found")
+        existing = self.connection.execute(
+            "SELECT run_id,status,reason FROM runs WHERE snapshot_id=? AND idempotency_key=?",
+            (snapshot_id, idempotency_key),
+        ).fetchone()
+        if existing is not None:
+            return dict(existing)
+        run_id = uuid.uuid4().hex
+        reason = "deterministic formula registry is not yet approved for this snapshot"
+        chain = {
+            "snapshot_id": snapshot_id,
+            "input_graph_sha256": hashlib.sha256(snapshot["graph_json"].encode("utf-8")).hexdigest(),
+            "status": "blocked",
+            "reason": reason,
+        }
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO runs VALUES (?,?,?,?,?,?,?,?)",
+                (run_id, snapshot_id, None, idempotency_key, "blocked", reason,
+                 json.dumps(chain, ensure_ascii=False, sort_keys=True), _utc_now()),
+            )
+            self._event(snapshot["task_id"], None, "run.blocked", {"run_id": run_id, "reason": reason})
+        return {"run_id": run_id, "status": "blocked", "reason": reason}
+
+    def run(self, run_id: str) -> dict[str, Any]:
+        row = self.connection.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError("run not found")
+        result = dict(row)
+        result.pop("chain_json")
+        return result
+
+    def run_chain(self, run_id: str) -> dict[str, Any]:
+        row = self.connection.execute("SELECT chain_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError("run not found")
+        return json.loads(row["chain_json"])

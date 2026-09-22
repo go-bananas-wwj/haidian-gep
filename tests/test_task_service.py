@@ -73,6 +73,30 @@ class TaskServiceTests(unittest.TestCase):
 
         self.assertTrue(snapshot["snapshot_id"])
 
+    def test_run_rejects_an_unknown_snapshot(self):
+        """Break caught: a caller could launch a calculation without frozen reviewed inputs."""
+        with self.assertRaises(KeyError):
+            self.store.create_run("missing-snapshot", "request-1")
+
+    def test_run_request_is_idempotent_for_a_frozen_snapshot(self):
+        """Break caught: reconnecting clients could create duplicate calculation runs."""
+        self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.store.connection.commit()
+        snapshot = self.store.create_snapshot(task["task_id"])
+
+        first = self.store.create_run(snapshot["snapshot_id"], "run-request-1")
+        retried = self.store.create_run(snapshot["snapshot_id"], "run-request-1")
+        events = [event for event in self.store.events(task["task_id"]) if event["type"] == "run.blocked"]
+
+        self.assertEqual(first["run_id"], retried["run_id"])
+        self.assertEqual(first["status"], "blocked")
+        self.assertEqual(len(events), 1)
+
     def test_review_requires_current_node_version(self):
         task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
         maize = self.store.node(task["task_id"], "P1.maize.quantity")
