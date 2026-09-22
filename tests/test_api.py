@@ -124,6 +124,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('id="execute-run"', page["html"])
 
+    def test_root_exposes_a_real_supplement_request_action(self):
+        """Break caught: a missing input could not enter the durable evidence-gated supplement workflow."""
+        status, page, _ = self.request("GET", "/")
+
+        self.assertEqual(status, 200)
+        self.assertIn("请求智能体补充", page["html"])
+
     def test_task_center_lists_persisted_task_state_and_latest_run(self):
         """Break caught: a refresh could leave users unable to find a persisted task or its blockers."""
         _, first, _ = self.request("POST", "/tasks", {
