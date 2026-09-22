@@ -103,6 +103,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(maize_quantity["value"], 2935.1)
         self.assertIn("P1", maize["blocking_nodes"])
 
+    def test_root_exposes_the_incomplete_appendix_e_action(self):
+        """Break caught: the task canvas could offer no user-visible route to its Appendix E report."""
+        status, page, _ = self.request("GET", "/")
+
+        self.assertEqual(status, 200)
+        self.assertIn('id="appendix-e"', page["html"])
+
     def test_data_version_catalog_exposes_a_verified_blocked_reference_package(self):
         """Break caught: the canvas could call a reference package accounting-ready without its manifest or gaps."""
         list_status, listing, _ = self.request("GET", "/data-versions")
