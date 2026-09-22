@@ -4,7 +4,12 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from ..methods import method_cards
-from .material import MaterialResult, calculate_residual_value
+from .material import (
+    MaterialResult,
+    calculate_ecological_energy,
+    calculate_freshwater_supply,
+    calculate_residual_value,
+)
 from .regulating import calculate_carbon_from_npp, calculate_oxygen_from_carbon, calculate_water_balance
 from .cultural import calculate_landscape_premium, calculate_recreation_time, calculate_travel_cost
 
@@ -23,6 +28,10 @@ def calculate_indicator(indicator_id: str, inputs: Mapping[str, Any]) -> Materia
         raise ValueError("indicator must be one of the 22 registered GEP subjects")
     if indicator_id in {"P1", "P2", "P3", "P4", "P7"}:
         return calculate_residual_value(indicator_id, inputs)
+    if indicator_id == "P5":
+        return calculate_freshwater_supply(inputs)
+    if indicator_id == "P6":
+        return calculate_ecological_energy(inputs)
     if indicator_id == "R6":
         return calculate_carbon_from_npp(inputs)
     if indicator_id == "R7":

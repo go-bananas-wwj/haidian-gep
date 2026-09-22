@@ -90,3 +90,50 @@ def calculate_residual_value(indicator_id: str, inputs: Mapping[str, Any]) -> Ma
         True, quantity_value, quantity_unit, output_value, residual, residual / 10_000,
         "A.2", "requires_human_review" if residual < 0 else "calculated", (),
     )
+
+
+def calculate_freshwater_supply(inputs: Mapping[str, Any]) -> MaterialResult:
+    """Calculate P5 from locally used water after external and recycled routes are removed."""
+    local_used = _measurement(inputs, "local_used_water", "m3/a")
+    outside = _measurement(inputs, "outside_water", "m3/a")
+    recycled = _measurement(inputs, "recycled_water", "m3/a")
+    price = _measurement(inputs, "valuation_parameter", "元/m3")
+    values = {
+        "local_used_water": local_used,
+        "outside_water": outside,
+        "recycled_water": recycled,
+        "valuation_parameter": price,
+    }
+    invalid = [field for field, value in values.items() if value is None or value < 0]
+    if invalid:
+        return MaterialResult(False, None, None, None, None, None, "A.1/A.2", "blocked", tuple(sorted(invalid)))
+    local_natural_water = local_used - outside - recycled
+    value_yuan = local_natural_water * price
+    return MaterialResult(
+        True, local_natural_water, "m3/a", None, value_yuan, value_yuan / 10_000,
+        "A.1/A.2", "requires_human_review" if local_natural_water < 0 else "calculated", (),
+    )
+
+
+def calculate_ecological_energy(inputs: Mapping[str, Any]) -> MaterialResult:
+    """Calculate P6 from the locally produced energy that was actually used in 2024."""
+    output = _measurement(inputs, "actual_energy_output", "kWh/a")
+    use = _measurement(inputs, "actual_use", "kWh/a")
+    price = _measurement(inputs, "producer_price", "元/kWh")
+    cost = _measurement(inputs, "production_cost", "元/a")
+    values = {
+        "actual_energy_output": output,
+        "actual_use": use,
+        "producer_price": price,
+        "production_cost": cost,
+    }
+    invalid = [field for field, value in values.items() if value is None or value < 0]
+    if invalid:
+        return MaterialResult(False, None, None, None, None, None, "A.1", "blocked", tuple(sorted(invalid)))
+    eligible_energy = min(output, use)
+    output_value = eligible_energy * price
+    residual = output_value - cost
+    return MaterialResult(
+        True, eligible_energy, "kWh/a", output_value, residual, residual / 10_000,
+        "A.1", "requires_human_review" if residual < 0 else "calculated", (),
+    )

@@ -1,6 +1,6 @@
 import unittest
 
-from gep.formulas.material import calculate_residual_value
+from gep.formulas.material import calculate_ecological_energy, calculate_freshwater_supply, calculate_residual_value
 from gep.formulas.registry import calculate_indicator
 
 
@@ -82,6 +82,52 @@ class MaterialFormulaTests(unittest.TestCase):
         self.assertEqual(results["P7"].value_yuan, 4_000)
         self.assertTrue(all(result.calculated for result in results.values()))
         self.assertTrue(all(result.standard_clause == "A.2" for result in results.values()))
+
+    def test_p5_deducts_outside_and_recycled_water_from_locally_used_water(self):
+        result = calculate_freshwater_supply({
+            "local_used_water": {"value": 1000, "unit": "m3/a"},
+            "outside_water": {"value": 300, "unit": "m3/a"},
+            "recycled_water": {"value": 200, "unit": "m3/a"},
+            "valuation_parameter": {"value": 2, "unit": "元/m3"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.physical_value, 500)
+        self.assertEqual(result.physical_unit, "m3/a")
+        self.assertEqual(result.value_yuan, 1_000)
+        self.assertEqual(result.standard_clause, "A.1/A.2")
+
+    def test_p6_counts_only_energy_that_is_both_locally_produced_and_actually_used(self):
+        result = calculate_ecological_energy({
+            "actual_energy_output": {"value": 1000, "unit": "kWh/a"},
+            "actual_use": {"value": 600, "unit": "kWh/a"},
+            "producer_price": {"value": 1, "unit": "元/kWh"},
+            "production_cost": {"value": 100, "unit": "元/a"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.physical_value, 600)
+        self.assertEqual(result.physical_unit, "kWh/a")
+        self.assertEqual(result.output_value_yuan, 600)
+        self.assertEqual(result.value_yuan, 500)
+        self.assertEqual(result.standard_clause, "A.1")
+
+    def test_registry_dispatches_p5_and_p6_instead_of_a_pending_placeholder(self):
+        freshwater = calculate_indicator("P5", {
+            "local_used_water": {"value": 1, "unit": "m3/a"},
+            "outside_water": {"value": 0, "unit": "m3/a"},
+            "recycled_water": {"value": 0, "unit": "m3/a"},
+            "valuation_parameter": {"value": 1, "unit": "元/m3"},
+        })
+        energy = calculate_indicator("P6", {
+            "actual_energy_output": {"value": 1, "unit": "kWh/a"},
+            "actual_use": {"value": 1, "unit": "kWh/a"},
+            "producer_price": {"value": 1, "unit": "元/kWh"},
+            "production_cost": {"value": 0, "unit": "元/a"},
+        })
+
+        self.assertEqual(freshwater.value_yuan, 1)
+        self.assertEqual(energy.value_yuan, 1)
 
 
 if __name__ == "__main__":
