@@ -48,6 +48,12 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn("鱼骨", graph)
         self.assertIn("localStorage", graph)
 
+    def test_product_fishbone_uses_readable_accounting_field_labels(self):
+        graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
+        self.assertIn("资本回报", graph)
+        self.assertIn("中间投入成本", graph)
+        self.assertIn("玉米产量", graph)
+
 
 if __name__ == "__main__":
     unittest.main()

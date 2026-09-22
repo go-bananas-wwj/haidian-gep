@@ -17,6 +17,18 @@ const detailDescriptions = {
   P4: "渔产品需要水体、捕捞或养殖产量、当地来源和成本凭据；教学数值不能替代正式输入。",
 };
 
+const FIELD_LABELS = {
+  "玉米产量": "玉米产量",
+  quantity: "产量", harvest_quantity: "采收量", eligible_quantity: "适格产量", deliverable_quantity: "可交付量",
+  producer_price: "生产者价格", production_cost: "生产成本", intermediate_cost: "中间投入成本", labor: "劳动报酬",
+  depreciation: "固定资产折旧", tax_net: "生产税净额", capital_return: "资本回报", actual_energy_output: "实际能源产出",
+  actual_use: "实际使用量", local_used_water: "本地生态供水量", carbon_price: "碳价",
+};
+
+function readableField(node) {
+  return FIELD_LABELS[node.label] || FIELD_LABELS[node.node_key.split(".").at(-1)] || node.label;
+}
+
 export function nodeState(node) {
   if (node.review_status === "approved") return ["审核通过", "approved"];
   if (node.review_status === "pending_review") return ["智能体已补充·待审核", ""];
@@ -82,7 +94,7 @@ export class GepGraph {
     if (!inputs.length) { branches.innerHTML = '<div class="fish-empty">尚未建立该指标的核算要素。保留为待补充，不能视为零值。</div>'; }
     for (const input of inputs) {
       const [state, style] = nodeState(input); const node = document.createElement("button"); node.className = "fish-node";
-      node.innerHTML = `<strong>${input.label}</strong><small>${input.value === null ? "等待可审核数据" : `${input.value} ${input.unit || ""}`}</small><span class="node-state ${style}">${state}</span>`;
+      node.innerHTML = `<strong>${readableField(input)}</strong><small>${input.value === null ? "等待可审核数据" : `${input.value} ${input.unit || ""}`}</small><span class="node-state ${style}">${state}</span>`;
       node.onclick = () => onNode(input); branches.append(node);
     }
     row.append(branches); return row;
