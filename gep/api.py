@@ -8,13 +8,14 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from .data_packages import DataPackageCatalog
+from .dify import DifyWorkflow
 from .methods import method_cards
 from .task_service import ConflictError, GepStore, SnapshotBlocked
 
 
 class DemoApi:
     def __init__(self, database_path: str | Path, reviewer_header: str | None = None, data_root: str | Path | None = None):
-        self.store = GepStore(database_path)
+        self.store = GepStore(database_path, supplement_workflow=DifyWorkflow.from_environment())
         self.reviewer_header = reviewer_header or os.environ.get("GEP_TRUSTED_PROXY_USER_HEADER")
         self.data_packages = DataPackageCatalog(data_root or os.environ.get("GEP_DATA_ROOT"))
 

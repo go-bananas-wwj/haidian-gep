@@ -51,6 +51,80 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(maize["evidence"]["printed_page"], 71)
         self.assertNotIn("synthetic", str(maize).lower())
 
+    def test_configured_workflow_persists_a_structured_candidate_pending_review(self):
+        """Break caught: a model response could be mistaken for an approved input or lose its source trail."""
+        class Workflow:
+            def run(self, work_order):
+                self.work_order = work_order
+                return {
+                    "value": 2100,
+                    "unit": "yuan/t",
+                    "explanation": "从已归档的价格表提取了海淀区 2024 年玉米生产者价格。",
+                    "evidence": {
+                        "source_id": "price-register-2024",
+                        "source_type": "official_register",
+                        "locator": "table=maize;row=2024;column=producer_price",
+                        "source_sha256": "a" * 64,
+                        "license_or_access": "internal-review-required",
+                        "tool_run_id": "dify-run-001",
+                        "extracted_fragment": "玉米，2024，2100 元/吨",
+                    },
+                }
+
+        workflow = Workflow()
+        self.store.close()
+        self.store = GepStore(Path(self.directory.name) / "tasks.sqlite3", supplement_workflow=workflow)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "P1.maize.producer_price")
+
+        job = self.store.request_supplement(task["task_id"], node["node_id"], "price-request-1")
+
+        current = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.assertEqual(job["status"], "completed_pending_review")
+        self.assertEqual(current["value"], 2100)
+        self.assertEqual(current["unit"], "yuan/t")
+        self.assertEqual(current["review_status"], "pending_review")
+        self.assertEqual(current["acquisition_status"], "candidate_ready")
+        self.assertEqual(current["evidence"]["current"]["source_id"], "price-register-2024")
+        self.assertEqual(workflow.work_order["node_id"], node["node_id"])
+        self.assertEqual(workflow.work_order["year"], 2024)
+
+    def test_supplement_refuses_to_overwrite_a_node_changed_while_workflow_was_running(self):
+        """Break caught: a late model result could overwrite a human's newer evidence version."""
+        database = Path(self.directory.name) / "tasks.sqlite3"
+        concurrent = GepStore(database)
+
+        class Workflow:
+            def run(self, work_order):
+                concurrent.revise_node(
+                    work_order["node_id"], 1, 2050, "yuan/t", "operator", "manual correction arrived first", {
+                        "source_id": "manual-price-register", "source_type": "official_register",
+                        "locator": "row=2024", "source_sha256": "b" * 64,
+                    },
+                )
+                return {
+                    "value": 2100, "unit": "yuan/t", "explanation": "late agent result",
+                    "evidence": {"source_id": "agent-price-register", "source_type": "official_register",
+                                 "locator": "row=2024", "source_sha256": "a" * 64,
+                                 "license_or_access": "review", "tool_run_id": "dify-run-2",
+                                 "extracted_fragment": "2100"},
+                }
+
+        self.store.close()
+        self.store = GepStore(database, supplement_workflow=Workflow())
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "P1.maize.producer_price")
+        try:
+            with self.assertRaises(ConflictError):
+                self.store.request_supplement(task["task_id"], node["node_id"], "price-request-race")
+        finally:
+            concurrent.close()
+
+        current = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.assertEqual(current["value"], 2050)
+        jobs = self.store.connection.execute("SELECT * FROM supplement_jobs").fetchall()
+        self.assertEqual(jobs, [])
+
     def test_existing_task_database_migrates_to_include_graph_version(self):
         """Break caught: the deployed pre-versioned SQLite task table could not support task-center summaries."""
         legacy_path = Path(self.directory.name) / "legacy-tasks.sqlite3"

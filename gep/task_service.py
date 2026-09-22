@@ -12,7 +12,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .methods import method_cards
 from .runs import evaluate_frozen_graph
@@ -45,17 +45,31 @@ class SnapshotBlocked(ValueError):
         self.blocking = blocking
 
 
+class SupplementWorkflow(Protocol):
+    """A configured agent workflow that returns one structured candidate."""
+
+    def run(self, work_order: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class UnconfiguredSupplementWorkflow:
+    """Safe default: never invent a candidate when no real workflow is configured."""
+
+    def run(self, work_order: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("Dify workflow is not configured; no supplement candidate was generated")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 class GepStore:
-    def __init__(self, database_path: str | Path):
+    def __init__(self, database_path: str | Path, supplement_workflow: SupplementWorkflow | None = None):
         self.connection = sqlite3.connect(str(database_path))
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA busy_timeout=5000")
         self.connection.execute("PRAGMA foreign_keys=ON")
+        self.supplement_workflow = supplement_workflow or UnconfiguredSupplementWorkflow()
         self._create_schema()
 
     def close(self) -> None:
@@ -534,6 +548,61 @@ class GepStore:
         ).fetchall()
         return [{**dict(row), "payload": json.loads(row["payload_json"]), "payload_json": None} for row in rows]
 
+    @staticmethod
+    def _candidate_from_workflow(payload: Any) -> dict[str, Any]:
+        """Accept only a fully traceable, JSON-safe candidate from an agent workflow."""
+        if not isinstance(payload, dict):
+            raise ValueError("workflow response must be a JSON object")
+        value = payload.get("value")
+        if value is None:
+            raise ValueError("workflow candidate requires a non-null value")
+        try:
+            json.dumps(value, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ValueError("workflow candidate value must be JSON-safe") from error
+        unit = payload.get("unit")
+        explanation = payload.get("explanation")
+        evidence = payload.get("evidence")
+        if not isinstance(unit, str) or not unit.strip():
+            raise ValueError("workflow candidate requires a unit")
+        if not isinstance(explanation, str) or not explanation.strip():
+            raise ValueError("workflow candidate requires an explanation")
+        if not isinstance(evidence, dict):
+            raise ValueError("workflow candidate requires structured evidence")
+        required_evidence = (
+            "source_id", "source_type", "locator", "source_sha256", "license_or_access",
+            "tool_run_id", "extracted_fragment",
+        )
+        if any(not str(evidence.get(key, "")).strip() for key in required_evidence):
+            raise ValueError("workflow evidence is missing a required source or execution field")
+        source_sha256 = str(evidence["source_sha256"])
+        if len(source_sha256) != 64 or any(character not in "0123456789abcdef" for character in source_sha256.lower()):
+            raise ValueError("workflow evidence requires a SHA-256 source hash")
+        return {
+            "value": value,
+            "unit": unit.strip(),
+            "explanation": explanation.strip(),
+            "evidence": {**evidence, "source_sha256": source_sha256.lower()},
+        }
+
+    def _supplement_work_order(self, task_id: str, node: sqlite3.Row) -> dict[str, Any]:
+        graph = self.graph(task_id)
+        task = graph["task"]
+        indicator_id = node["parent_key"]
+        card = METHOD_CARDS.get(indicator_id)
+        return {
+            "task_id": task_id,
+            "node_id": node["node_id"],
+            "node_key": node["node_key"],
+            "indicator_id": indicator_id,
+            "method_id": card.method_id if card else None,
+            "required_fields": list(card.required_fields) if card else [],
+            "region_code": task["region_code"],
+            "year": task["year"],
+            "boundary_version": task["boundary_version"],
+            "data_version": task["data_version"],
+        }
+
     def request_supplement(self, task_id: str, node_id: str, idempotency_key: str) -> dict[str, str]:
         if not idempotency_key.strip():
             raise ValueError("idempotency_key is required")
@@ -546,15 +615,48 @@ class GepStore:
         ).fetchone()
         if existing is not None:
             return {key: existing[key] for key in ("job_id", "status", "reason")}
-        reason = "Dify workflow is not configured; no supplement candidate was generated"
         job_id = uuid.uuid4().hex
+        try:
+            candidate = self._candidate_from_workflow(self.supplement_workflow.run(self._supplement_work_order(task_id, node)))
+        except (OSError, RuntimeError, ValueError) as error:
+            reason = str(error)
+            acquisition_status = "awaiting_agent" if "not configured" in reason else "agent_failed"
+            with self.connection:
+                self.connection.execute(
+                    "INSERT INTO supplement_jobs VALUES (?,?,?,?,?,?,?)",
+                    (job_id, task_id, node_id, idempotency_key, "blocked", reason, _utc_now()),
+                )
+                self.connection.execute("UPDATE nodes SET acquisition_status=? WHERE node_id=?", (acquisition_status, node_id))
+                self._event(task_id, node_id, "supplement.blocked", {"job_id": job_id, "reason": reason})
+            return {"job_id": job_id, "status": "blocked", "reason": reason}
+
+        current_evidence = json.loads(node["evidence_json"])
+        candidate_evidence = {
+            **candidate["evidence"],
+            "explanation": candidate["explanation"],
+            "result_type": "agent_candidate",
+            "received_utc": _utc_now(),
+        }
+        combined_evidence = {"original": current_evidence, "current": candidate_evidence}
+        next_version = node["version"] + 1
         with self.connection:
             self.connection.execute(
                 "INSERT INTO supplement_jobs VALUES (?,?,?,?,?,?,?)",
-                (job_id, task_id, node_id, idempotency_key, "blocked", reason, _utc_now()),
+                (job_id, task_id, node_id, idempotency_key, "completed_pending_review", "candidate persisted; human review required", _utc_now()),
             )
-            self._event(task_id, node_id, "supplement.blocked", {"job_id": job_id, "reason": reason})
-        return {"job_id": job_id, "status": "blocked", "reason": reason}
+            updated = self.connection.execute(
+                "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,acquisition_status='candidate_ready',review_status='pending_review',version=? WHERE node_id=? AND version=?",
+                (json.dumps(candidate["value"], ensure_ascii=False, allow_nan=False), candidate["unit"],
+                 json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
+            )
+            if updated.rowcount != 1:
+                raise ConflictError("node version is stale")
+            self._bump_graph_version(task_id)
+            self._event(task_id, node_id, "supplement.candidate_persisted", {
+                "job_id": job_id, "version": next_version, "source_id": candidate["evidence"]["source_id"],
+                "source_sha256": candidate["evidence"]["source_sha256"], "tool_run_id": candidate["evidence"]["tool_run_id"],
+            })
+        return {"job_id": job_id, "status": "completed_pending_review", "reason": "candidate persisted; human review required"}
 
     def create_snapshot(self, task_id: str) -> dict[str, str]:
         graph = self.graph(task_id)

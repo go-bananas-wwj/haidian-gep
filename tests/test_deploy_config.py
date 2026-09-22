@@ -21,6 +21,15 @@ class DeploymentConfigTests(unittest.TestCase):
             api_section,
         )
 
+    def test_api_accepts_dify_configuration_only_from_runtime_environment(self):
+        """Break caught: a real workflow could not be enabled, or a credential could be committed into Compose."""
+        compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
+        api_section, _ = compose.split("  task-web:", 1)
+
+        self.assertIn("DIFY_API_BASE_URL: ${DIFY_API_BASE_URL:-}", api_section)
+        self.assertIn("DIFY_API_KEY: ${DIFY_API_KEY:-}", api_section)
+        self.assertNotIn("DIFY_API_KEY: sk-", api_section)
+
     def test_web_waits_for_api_health_before_first_start(self):
         compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
         api_section, web_section = compose.split("  task-web:", 1)

@@ -22,6 +22,8 @@ API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0
 
 按详细方案 §12.1 下载并冻结 Dify 官方、完整 Docker Compose 配置及镜像摘要，独立部署在内部网络。配置真实模型后，业务服务才可调用其工作流。未配置时，本服务会将补充请求保留为 `blocked`，绝不生成模拟候选或“已补充”状态。
 
+将 Dify 地址和应用密钥仅写入宿主机由 `wwj` 限制读取的环境文件（例如 `/data/wwj/haidian-gep/runtime/dify.env`），并在启动前由受限会话导入；不得把该文件、密钥、模型返回的完整请求头或模型提示词提交到 Git、镜像层、SQLite 事件或导出包。工作流必须接受 `work_order_json`，并返回名为 `candidate_json` 的 JSON 对象，含 `value`、`unit`、`explanation` 及带来源 SHA-256、定位、许可、工具运行 ID 与提取片段的 `evidence`。服务只将通过该结构校验的结果写为 `candidate_ready/pending_review`；审核通过前不进入快照。
+
 审核接口默认拒绝请求，直到受信任反向代理完成登录验证、移除外部伪造的用户头，并向 API 注入已验证的身份头。届时设置 `GEP_TRUSTED_PROXY_USER_HEADER=HTTP_X_GEP_ACTOR`；浏览器提交的 `reviewer`、`proposer` 字段不会作为审计身份采用。
 
 每个可适用科目还必须提交带参数清单 SHA-256、来源 SHA-256 和方法卡哈希的公式版本，并通过指定版本审核，才能冻结正式快照。相关接口为 `POST /formula-versions`、`POST /formula-versions/{id}/reviews` 及 `GET /formula-versions/{id}/reviews`。`GET /snapshots/{id}/export` 返回自带 SHA-256 的冻结审计包，其中 GEP 值明确为 `null`，可供下载端独立验签。这些记录只负责锁定可审计方法与参数；若确定性计算引擎尚未配置，`POST /runs` 仍会以 `blocked` 状态保留运行请求，不产生 GEP 值。
