@@ -83,6 +83,12 @@ class GepStore:
                 snapshot_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                 graph_json TEXT NOT NULL, created_utc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS supplement_jobs (
+                job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
+                node_id TEXT NOT NULL REFERENCES nodes(node_id), idempotency_key TEXT NOT NULL,
+                status TEXT NOT NULL, reason TEXT NOT NULL, created_utc TEXT NOT NULL,
+                UNIQUE(task_id, node_id, idempotency_key)
+            );
             """
         )
         self.connection.commit()
@@ -165,6 +171,10 @@ class GepStore:
             raise KeyError("node not found")
         return row
 
+    def evidence(self, node_id: str) -> dict[str, Any]:
+        row = self._node_by_id(node_id)
+        return self._node_dict(row)
+
     def review_node(self, node_id: str, expected_version: int, decision: str, reviewer: str, note: str) -> dict[str, Any]:
         if decision not in {"approved", "returned"} or not reviewer.strip() or not note.strip():
             raise ValueError("decision, reviewer, and note are required")
@@ -203,6 +213,28 @@ class GepStore:
             "SELECT * FROM events WHERE task_id=? AND sequence>? ORDER BY sequence", (task_id, after)
         ).fetchall()
         return [{**dict(row), "payload": json.loads(row["payload_json"]), "payload_json": None} for row in rows]
+
+    def request_supplement(self, task_id: str, node_id: str, idempotency_key: str) -> dict[str, str]:
+        if not idempotency_key.strip():
+            raise ValueError("idempotency_key is required")
+        node = self._node_by_id(node_id)
+        if node["task_id"] != task_id:
+            raise ValueError("node does not belong to task")
+        existing = self.connection.execute(
+            "SELECT * FROM supplement_jobs WHERE task_id=? AND node_id=? AND idempotency_key=?",
+            (task_id, node_id, idempotency_key),
+        ).fetchone()
+        if existing is not None:
+            return {key: existing[key] for key in ("job_id", "status", "reason")}
+        reason = "Dify workflow is not configured; no supplement candidate was generated"
+        job_id = uuid.uuid4().hex
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO supplement_jobs VALUES (?,?,?,?,?,?,?)",
+                (job_id, task_id, node_id, idempotency_key, "blocked", reason, _utc_now()),
+            )
+            self._event(task_id, node_id, "supplement.blocked", {"job_id": job_id, "reason": reason})
+        return {"job_id": job_id, "status": "blocked", "reason": reason}
 
     def create_snapshot(self, task_id: str) -> dict[str, str]:
         nodes = self.graph(task_id)["nodes"]

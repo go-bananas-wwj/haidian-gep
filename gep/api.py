@@ -1,0 +1,87 @@
+"""Dependency-free WSGI API for the evidence-first GEP task service."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import parse_qs
+
+from .task_service import ConflictError, GepStore, SnapshotBlocked
+
+
+class DemoApi:
+    def __init__(self, database_path: str | Path):
+        self.store = GepStore(database_path)
+
+    def close(self) -> None:
+        self.store.close()
+
+    @staticmethod
+    def _json_body(environ: dict[str, Any]) -> dict[str, Any]:
+        length = int(environ.get("CONTENT_LENGTH") or 0)
+        if length == 0:
+            return {}
+        body = environ["wsgi.input"].read(length)
+        value = json.loads(body.decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("JSON body must be an object")
+        return value
+
+    @staticmethod
+    def _response(start_response: Callable, status: int, payload: dict[str, Any]):
+        data = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        start_response(f"{status} { {200:'OK', 201:'Created', 202:'Accepted', 400:'Bad Request', 404:'Not Found', 409:'Conflict', 422:'Unprocessable Entity', 500:'Internal Server Error'}[status] }", [
+            ("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(data))),
+        ])
+        return [data]
+
+    @staticmethod
+    def _html_response(start_response: Callable, html: bytes):
+        start_response("200 OK", [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(html)))])
+        return [html]
+
+    def __call__(self, environ: dict[str, Any], start_response: Callable):
+        method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "")
+        parts = [part for part in path.split("/") if part]
+        try:
+            if method == "GET" and path == "/":
+                return self._html_response(start_response, (Path(__file__).parent / "web" / "index.html").read_bytes())
+            if method == "GET" and path == "/health":
+                return self._response(start_response, 200, {"status": "ok"})
+            if method == "POST" and parts == ["tasks"]:
+                body = self._json_body(environ)
+                task = self.store.create_task(**body)
+                return self._response(start_response, 201, task)
+            if len(parts) >= 2 and parts[0] == "tasks":
+                task_id = parts[1]
+                if method == "GET" and parts[2:] == ["graph"]:
+                    return self._response(start_response, 200, self.store.graph(task_id))
+                if method == "GET" and parts[2:] == ["events"]:
+                    after = int(parse_qs(environ.get("QUERY_STRING", "")).get("after", ["0"])[0])
+                    return self._response(start_response, 200, {"events": self.store.events(task_id, after)})
+                if method == "POST" and parts[2:] == ["supplement"]:
+                    return self._response(start_response, 202, self.store.request_supplement(task_id, **self._json_body(environ)))
+                if method == "POST" and parts[2:] == ["snapshots"]:
+                    return self._response(start_response, 201, self.store.create_snapshot(task_id))
+            if len(parts) >= 2 and parts[0] == "nodes":
+                node_id = parts[1]
+                if method == "GET" and parts[2:] == ["evidence"]:
+                    return self._response(start_response, 200, self.store.evidence(node_id))
+                body = self._json_body(environ)
+                if method == "POST" and parts[2:] == ["reviews"]:
+                    return self._response(start_response, 200, self.store.review_node(node_id, **body))
+                if method == "POST" and parts[2:] == ["revisions"]:
+                    return self._response(start_response, 200, self.store.revise_node(node_id, **body))
+            return self._response(start_response, 404, {"error": "route not found"})
+        except SnapshotBlocked as error:
+            return self._response(start_response, 422, {"error": str(error), "blocking_nodes": error.blocking})
+        except ConflictError as error:
+            return self._response(start_response, 409, {"error": str(error)})
+        except KeyError as error:
+            return self._response(start_response, 404, {"error": str(error)})
+        except (ValueError, TypeError, json.JSONDecodeError) as error:
+            return self._response(start_response, 400, {"error": str(error)})
+
+
+def make_app(database_path: str | Path) -> DemoApi:
+    return DemoApi(database_path)
