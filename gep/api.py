@@ -7,13 +7,15 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
 
+from .data_packages import DataPackageCatalog
 from .task_service import ConflictError, GepStore, SnapshotBlocked
 
 
 class DemoApi:
-    def __init__(self, database_path: str | Path, reviewer_header: str | None = None):
+    def __init__(self, database_path: str | Path, reviewer_header: str | None = None, data_root: str | Path | None = None):
         self.store = GepStore(database_path)
         self.reviewer_header = reviewer_header or os.environ.get("GEP_TRUSTED_PROXY_USER_HEADER")
+        self.data_packages = DataPackageCatalog(data_root or os.environ.get("GEP_DATA_ROOT"))
 
     def close(self) -> None:
         self.store.close()
@@ -50,6 +52,10 @@ class DemoApi:
                 return self._html_response(start_response, (Path(__file__).parent / "web" / "index.html").read_bytes())
             if method == "GET" and path == "/health":
                 return self._response(start_response, 200, {"status": "ok"})
+            if method == "GET" and parts == ["data-versions"]:
+                return self._response(start_response, 200, {"data_versions": self.data_packages.versions()})
+            if method == "GET" and len(parts) == 2 and parts[0] == "data-versions":
+                return self._response(start_response, 200, self.data_packages.summary(parts[1]))
             if method == "POST" and parts == ["tasks"]:
                 body = self._json_body(environ)
                 task = self.store.create_task(**body)
@@ -126,5 +132,7 @@ class DemoApi:
             return self._response(start_response, 400, {"error": str(error)})
 
 
-def make_app(database_path: str | Path, reviewer_header: str | None = None) -> DemoApi:
-    return DemoApi(database_path, reviewer_header=reviewer_header)
+def make_app(
+    database_path: str | Path, reviewer_header: str | None = None, data_root: str | Path | None = None,
+) -> DemoApi:
+    return DemoApi(database_path, reviewer_header=reviewer_header, data_root=data_root)

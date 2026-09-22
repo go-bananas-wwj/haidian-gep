@@ -7,6 +7,7 @@ from pathlib import Path
 from wsgiref.util import setup_testing_defaults
 
 from gep.api import make_app
+from gep.release import seal
 from gep.task_service import INDICATORS
 
 
@@ -15,7 +16,22 @@ class ApiTests(unittest.TestCase):
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
-        self.app = make_app(Path(self.directory.name) / "tasks.sqlite3", reviewer_header="HTTP_X_GEP_ACTOR")
+        self.data_root = Path(self.directory.name) / "data"
+        package = self.data_root / "05_release" / "reference-2024-v0.1"
+        package.mkdir(parents=True)
+        (package / "README.md").write_text("reference package\n", encoding="utf-8")
+        (package / "quality_report.json").write_text(json.dumps({
+            "accounting_ready": False, "full_gep_computed": False,
+            "remaining": ["confirmed 2024 boundary", "production costs and prices"],
+        }), encoding="utf-8")
+        (package / "missing_inputs.csv").write_text(
+            "item,name,status,required_next_step\nP1,农产品,pending,价格和成本\nR6,固碳,pending,NPP和价格\n",
+            encoding="utf-8",
+        )
+        seal(package, "reference-2024-v0.1")
+        self.app = make_app(
+            Path(self.directory.name) / "tasks.sqlite3", reviewer_header="HTTP_X_GEP_ACTOR", data_root=self.data_root,
+        )
 
     def tearDown(self):
         self.app.close()
@@ -56,6 +72,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len([n for n in graph["nodes"] if n["kind"] == "indicator"]), 22)
         self.assertEqual(blocked_status, 422)
         self.assertIn("P1.maize.quantity", blocked["blocking_nodes"])
+
+    def test_data_version_catalog_exposes_a_verified_blocked_reference_package(self):
+        """Break caught: the canvas could call a reference package accounting-ready without its manifest or gaps."""
+        list_status, listing, _ = self.request("GET", "/data-versions")
+        status, package, _ = self.request("GET", "/data-versions/reference-2024-v0.1")
+
+        self.assertEqual(list_status, 200)
+        self.assertEqual(listing["data_versions"], ["reference-2024-v0.1"])
+        self.assertEqual(status, 200)
+        self.assertFalse(package["accounting_ready"])
+        self.assertFalse(package["full_gep_computed"])
+        self.assertTrue(package["release_verification"]["valid"])
+        self.assertEqual(package["missing_input_count"], 2)
+        self.assertEqual(package["remaining"], ["confirmed 2024 boundary", "production costs and prices"])
 
     def test_stale_review_returns_409_and_evidence_is_readable(self):
         _, task, _ = self.request("POST", "/tasks", {

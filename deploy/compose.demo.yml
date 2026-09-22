@@ -2,6 +2,8 @@ services:
   task-api:
     build: ..
     command: ["serve", "--host", "0.0.0.0", "--port", "8000", "--database", "/var/lib/haidian-gep/tasks.sqlite3"]
+    environment:
+      GEP_DATA_ROOT: /var/lib/haidian-gep-data
     volumes:
       - ${GEP_RUNTIME_DIR:?Set GEP_RUNTIME_DIR to the persistent runtime directory}:/var/lib/haidian-gep
       - ${GEP_DATA_DIR:?Set GEP_DATA_DIR to the admitted data directory}:/var/lib/haidian-gep-data:ro
