@@ -187,6 +187,19 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(admission["data_version"], "audited-2024-v1")
         self.assertEqual(admission["registered_by"], "data-custodian")
 
+    def test_boundary_admission_requires_a_trusted_actor_and_records_it(self):
+        """Break caught: an unauthenticated caller could admit an arbitrary region boundary."""
+        body = {"boundary_version": "official-2024-v1", "geometry_sha256": "c" * 64,
+                "area_km2": 430.0, "crs": "EPSG:4326", "accepted": True}
+
+        denied_status, _, _ = self.request("POST", "/boundary-admissions", body, actor="")
+        status, admission, _ = self.request("POST", "/boundary-admissions", body, actor="boundary-custodian")
+
+        self.assertEqual(denied_status, 503)
+        self.assertEqual(status, 201)
+        self.assertEqual(admission["boundary_version"], "official-2024-v1")
+        self.assertEqual(admission["registered_by"], "boundary-custodian")
+
     def test_stale_review_returns_409_and_evidence_is_readable(self):
         _, task, _ = self.request("POST", "/tasks", {
             "region_code": "110108", "year": 2024, "boundary_version": "b1",

@@ -104,7 +104,7 @@ class GepStore:
             CREATE TABLE IF NOT EXISTS boundary_admissions (
                 boundary_version TEXT PRIMARY KEY, geometry_sha256 TEXT NOT NULL,
                 area_km2 REAL NOT NULL, crs TEXT NOT NULL, accepted INTEGER NOT NULL,
-                registered_utc TEXT NOT NULL
+                registered_utc TEXT NOT NULL, registered_by TEXT NOT NULL DEFAULT 'legacy_unknown'
             );
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id),
@@ -135,6 +135,9 @@ class GepStore:
         admission_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(data_admissions)")}
         if "registered_by" not in admission_columns:
             self.connection.execute("ALTER TABLE data_admissions ADD COLUMN registered_by TEXT NOT NULL DEFAULT 'legacy_unknown'")
+        boundary_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(boundary_admissions)")}
+        if "registered_by" not in boundary_columns:
+            self.connection.execute("ALTER TABLE boundary_admissions ADD COLUMN registered_by TEXT NOT NULL DEFAULT 'legacy_unknown'")
         self.connection.commit()
 
     def register_data_admission(self, data_version: str, manifest_sha256: str, accepted: bool, registered_by: str = "system") -> dict[str, Any]:
@@ -159,16 +162,17 @@ class GepStore:
 
     def register_boundary_admission(
         self, boundary_version: str, geometry_sha256: str, area_km2: float, crs: str, accepted: bool,
-    ) -> None:
+        registered_by: str = "system",
+    ) -> dict[str, Any]:
         """Persist one immutable boundary review for a task's full-region scope."""
-        if not boundary_version.strip() or not crs.strip():
+        if not boundary_version.strip() or not crs.strip() or not registered_by.strip():
             raise ValueError("boundary version and CRS are required")
         if len(geometry_sha256) != 64 or any(character not in "0123456789abcdef" for character in geometry_sha256.lower()):
             raise ValueError("boundary geometry must have a SHA-256 hash")
         if isinstance(area_km2, bool) or not isinstance(area_km2, (int, float)) or not math.isfinite(area_km2) or area_km2 <= 0:
             raise ValueError("boundary area must be a positive finite square-kilometre value")
         existing = self.connection.execute(
-            "SELECT geometry_sha256,area_km2,crs,accepted FROM boundary_admissions WHERE boundary_version=?",
+            "SELECT geometry_sha256,area_km2,crs,accepted,registered_by FROM boundary_admissions WHERE boundary_version=?",
             (boundary_version,),
         ).fetchone()
         if existing is not None:
@@ -176,12 +180,13 @@ class GepStore:
             actual = (existing["geometry_sha256"], existing["area_km2"], existing["crs"], existing["accepted"])
             if actual != expected:
                 raise ConflictError("boundary admission is immutable; use a new boundary version")
-            return
+            return {"boundary_version": boundary_version, "geometry_sha256": existing["geometry_sha256"], "area_km2": existing["area_km2"], "crs": existing["crs"], "accepted": bool(existing["accepted"]), "registered_by": existing["registered_by"]}
         with self.connection:
             self.connection.execute(
-                "INSERT INTO boundary_admissions VALUES (?,?,?,?,?,?)",
-                (boundary_version, geometry_sha256.lower(), float(area_km2), crs, int(accepted), _utc_now()),
+                "INSERT INTO boundary_admissions VALUES (?,?,?,?,?,?,?)",
+                (boundary_version, geometry_sha256.lower(), float(area_km2), crs, int(accepted), _utc_now(), registered_by),
             )
+        return {"boundary_version": boundary_version, "geometry_sha256": geometry_sha256.lower(), "area_km2": float(area_km2), "crs": crs, "accepted": accepted, "registered_by": registered_by}
 
     def _event(self, task_id: str, node_id: str | None, event_type: str, payload: dict[str, Any]) -> None:
         self.connection.execute(

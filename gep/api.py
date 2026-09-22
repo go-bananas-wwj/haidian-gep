@@ -61,6 +61,11 @@ class DemoApi:
                 if not actor:
                     return self._response(start_response, 503, {"error": "trusted data-custodian identity is not configured"})
                 return self._response(start_response, 201, self.store.register_data_admission(registered_by=actor, **self._json_body(environ)))
+            if method == "POST" and parts == ["boundary-admissions"]:
+                actor = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                if not actor:
+                    return self._response(start_response, 503, {"error": "trusted boundary-custodian identity is not configured"})
+                return self._response(start_response, 201, self.store.register_boundary_admission(registered_by=actor, **self._json_body(environ)))
             if method == "GET" and parts == ["tasks"]:
                 return self._response(start_response, 200, {"tasks": self.store.list_tasks()})
             if method == "POST" and parts == ["tasks"]:
