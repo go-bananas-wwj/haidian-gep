@@ -55,3 +55,11 @@ ssh -L 9088:127.0.0.1:9088 -p 3751 wwj@218.84.111.20
 - `GET /api/health` 实测返回 `{"status": "ok"}`。容器内 Dify 适配器实测为 `unconfigured`；未写入演示候选、未改动持久化任务的节点或审核记录。
 - 当且仅当宿主机受限环境提供 Dify 地址和应用密钥时，服务才向其工作流提交节点工作单。它只接受带数值、单位、说明、来源 SHA-256、定位、许可、工具运行 ID 与提取片段的 JSON 候选；候选始终落为 `candidate_ready/pending_review`，不会自动进入快照。人工在模型运行期间修正同一节点时，迟到候选以版本冲突回滚，不覆盖人工证据。
 - Dify 官方完整 Compose、模型/工作流版本及宿主机内部网络地址尚未提供或冻结，故本记录不把 Dify 标记为已部署或已验证；这仍是全口径 Demo 的外部前置依赖。
+
+## 增量部署：异步补充执行器（2026-09-22）
+
+- 代码提交：`78544dc`（`feat: run supplements through persistent worker queue`）。本地 `python3 -m unittest discover -s tests -v` 实测 122 项通过。
+- 宿主机以同一 `deploy` Compose 项目重建。`task-api` 健康、`task-web` 仍仅发布 `127.0.0.1:9088`，并新增无宿主机端口的 `task-worker`；API 镜像 ID 为 `sha256:28a9dd82e30028ca8b3aa8ec23c628eeea1a86e3bb43230aebf61defd043bc60`。
+- `GET /api/health` 实测返回 `{"status": "ok"}`。运行库补充作业按状态汇总为空，故本次验证没有向已有演示任务写入候选、审核或运行记录。
+- 补充接口现在只持久化 `queued` 作业；唯一 worker 以原子认领将其更新为 `running`，然后记录候选待审、配置阻断、工作流失败或版本过期。超过 5 分钟未完成的作业会回到队列并写入 `supplement.requeued` 事件，避免 worker 中断后永久卡住。
+- Dify 在本次部署后仍未配置。没有真实模型工作流、经审核外部来源与人工审核时，worker 只保留缺口或阻断，绝不生成 22 科目总值。
