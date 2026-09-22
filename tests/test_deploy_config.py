@@ -53,6 +53,14 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("pointerdown", page)
         self.assertIn("style.zoom", page)
 
+    def test_canvas_expands_an_indicator_from_its_real_required_input_nodes(self):
+        """Break caught: every GEP subject could misleadingly show only the maize detail branch."""
+        page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("parent_key===node.node_key", page)
+        self.assertIn("required_inputs", page)
+        self.assertIn("acquisition_status", page)
+
 
 if __name__ == "__main__":
     unittest.main()
