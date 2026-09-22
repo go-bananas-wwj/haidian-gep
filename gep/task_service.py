@@ -160,6 +160,14 @@ class GepStore:
             )
         return {"data_version": data_version, "manifest_sha256": manifest_sha256, "accepted": accepted, "registered_by": registered_by}
 
+    def data_admission(self, data_version: str) -> dict[str, Any]:
+        row = self.connection.execute("SELECT * FROM data_admissions WHERE data_version=?", (data_version,)).fetchone()
+        if row is None:
+            raise KeyError("data admission not found")
+        result = dict(row)
+        result["accepted"] = bool(result["accepted"])
+        return result
+
     def register_boundary_admission(
         self, boundary_version: str, geometry_sha256: str, area_km2: float, crs: str, accepted: bool,
         registered_by: str = "system",
@@ -187,6 +195,14 @@ class GepStore:
                 (boundary_version, geometry_sha256.lower(), float(area_km2), crs, int(accepted), _utc_now(), registered_by),
             )
         return {"boundary_version": boundary_version, "geometry_sha256": geometry_sha256.lower(), "area_km2": float(area_km2), "crs": crs, "accepted": accepted, "registered_by": registered_by}
+
+    def boundary_admission(self, boundary_version: str) -> dict[str, Any]:
+        row = self.connection.execute("SELECT * FROM boundary_admissions WHERE boundary_version=?", (boundary_version,)).fetchone()
+        if row is None:
+            raise KeyError("boundary admission not found")
+        result = dict(row)
+        result["accepted"] = bool(result["accepted"])
+        return result
 
     def _event(self, task_id: str, node_id: str | None, event_type: str, payload: dict[str, Any]) -> None:
         self.connection.execute(

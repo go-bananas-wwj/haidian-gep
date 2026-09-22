@@ -211,6 +211,19 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(admission["boundary_version"], "official-2024-v1")
         self.assertEqual(admission["registered_by"], "boundary-custodian")
 
+    def test_admission_records_are_readable_for_audit(self):
+        """Break caught: a snapshot gate could rely on an admission record that reviewers cannot inspect."""
+        self.app.store.register_data_admission("audited-2024-v1", "a" * 64, True, registered_by="data-custodian")
+        self.app.store.register_boundary_admission("official-2024-v1", "c" * 64, 430.0, "EPSG:4326", True, registered_by="boundary-custodian")
+
+        data_status, data, _ = self.request("GET", "/data-admissions/audited-2024-v1")
+        boundary_status, boundary, _ = self.request("GET", "/boundary-admissions/official-2024-v1")
+
+        self.assertEqual(data_status, 200)
+        self.assertEqual(data["registered_by"], "data-custodian")
+        self.assertEqual(boundary_status, 200)
+        self.assertEqual(boundary["geometry_sha256"], "c" * 64)
+
     def test_stale_review_returns_409_and_evidence_is_readable(self):
         _, task, _ = self.request("POST", "/tasks", {
             "region_code": "110108", "year": 2024, "boundary_version": "b1",
