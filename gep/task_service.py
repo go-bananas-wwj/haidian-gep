@@ -613,6 +613,13 @@ class GepStore:
         if existing is not None:
             return dict(existing)
         run_id = uuid.uuid4().hex
+        parent = self.connection.execute(
+            "SELECT runs.run_id FROM runs JOIN snapshots ON snapshots.snapshot_id=runs.snapshot_id "
+            "WHERE snapshots.task_id=? AND runs.snapshot_id<>? "
+            "ORDER BY runs.created_utc DESC,runs.run_id DESC LIMIT 1",
+            (snapshot["task_id"], snapshot_id),
+        ).fetchone()
+        parent_run_id = parent["run_id"] if parent is not None else None
         graph = json.loads(snapshot["graph_json"])
         evaluation = evaluate_frozen_graph(graph)
         calculation = {
@@ -629,6 +636,7 @@ class GepStore:
         )
         chain = {
             "snapshot_id": snapshot_id,
+            "parent_run_id": parent_run_id,
             "input_graph_sha256": hashlib.sha256(snapshot["graph_json"].encode("utf-8")).hexdigest(),
             "status": status,
             "reason": reason,
@@ -637,7 +645,7 @@ class GepStore:
         with self.connection:
             self.connection.execute(
                 "INSERT INTO runs VALUES (?,?,?,?,?,?,?,?)",
-                (run_id, snapshot_id, None, idempotency_key, status, reason,
+                (run_id, snapshot_id, parent_run_id, idempotency_key, status, reason,
                  json.dumps(chain, ensure_ascii=False, sort_keys=True), _utc_now()),
             )
             self._event(snapshot["task_id"], None, f"run.{status}", {"run_id": run_id, "reason": reason})

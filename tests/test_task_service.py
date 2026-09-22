@@ -263,6 +263,34 @@ class TaskServiceTests(unittest.TestCase):
         self.assertTrue(first["reason"])
         self.assertEqual(len(events), 1)
 
+    def test_new_run_links_to_prior_run_after_a_reviewed_input_correction(self):
+        """Break caught: correcting a price could erase its predecessor run and make the recalculation untraceable."""
+        self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
+        first_snapshot = self.store.create_snapshot(task["task_id"])
+        first_run = self.store.create_run(first_snapshot["snapshot_id"], "baseline-run")
+        price = self.store.node(task["task_id"], "P1.maize.producer_price")
+        revised = self.store.revise_node(
+            price["node_id"], price["version"], 101.0, "元/t", "analyst", "2024 price correction",
+            {"source_id": "approved-price-ledger", "source_type": "manual_correction", "locator": "row 4"},
+        )
+        self.store.review_node(revised["node_id"], revised["version"], "approved", "reviewer", "checked")
+        second_snapshot = self.store.create_snapshot(task["task_id"])
+
+        second_run = self.store.create_run(second_snapshot["snapshot_id"], "price-revision-run")
+        chain = self.store.run_chain(second_run["run_id"])
+
+        self.assertEqual(self.store.run(second_run["run_id"])["parent_run_id"], first_run["run_id"])
+        self.assertEqual(chain["parent_run_id"], first_run["run_id"])
+        self.assertIsNone(self.store.run(first_run["run_id"])["parent_run_id"])
+
     def test_run_chain_records_partial_calculation_and_exact_formal_blockers(self):
         """Break caught: a blocked run could discard available deterministic results or invent a total."""
         self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
