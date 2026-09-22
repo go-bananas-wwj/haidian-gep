@@ -166,6 +166,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('id="appendix-e"', page["html"])
 
+    def test_root_exposes_the_read_only_snapshot_readiness_action(self):
+        """Break caught: users could only discover formal blockers by trying to freeze a snapshot."""
+        status, page, _ = self.request("GET", "/")
+
+        self.assertEqual(status, 200)
+        self.assertIn('id="readiness"', page["html"])
+
     def test_root_exposes_the_persisted_task_center(self):
         """Break caught: the browser could not reopen a task saved in the persistent service."""
         status, page, _ = self.request("GET", "/")
