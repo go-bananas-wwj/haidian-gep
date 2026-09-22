@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import tempfile
 import unittest
@@ -169,6 +170,35 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(chain_code, 200)
         self.assertEqual(chain["snapshot_id"], snapshot["snapshot_id"])
         self.assertEqual(len(chain["input_graph_sha256"]), 64)
+
+    def test_snapshot_export_preserves_frozen_evidence_without_a_gep_value(self):
+        """Break caught: exporting a frozen snapshot could omit review evidence or invent a GEP total."""
+        self.app.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.app.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.app.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.app.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
+        snapshot = self.app.store.create_snapshot(task["task_id"])
+
+        status, exported, _ = self.request("GET", f"/snapshots/{snapshot['snapshot_id']}/export")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(exported["schema_version"], 1)
+        self.assertEqual(exported["formal_gep_value"], None)
+        self.assertEqual(exported["snapshot_id"], snapshot["snapshot_id"])
+        self.assertEqual(len(exported["input_graph_sha256"]), 64)
+        self.assertEqual(exported["data_admission"]["manifest_sha256"], "a" * 64)
+        self.assertEqual(len(exported["formula_versions"]), 22)
+        self.assertEqual(len(exported["formula_reviews"]), 22)
+        self.assertEqual(len(exported["export_sha256"]), 64)
+        exported_hash = exported.pop("export_sha256")
+        self.assertEqual(
+            exported_hash,
+            hashlib.sha256(json.dumps(exported, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+        )
 
     def test_formula_version_proposal_uses_the_trusted_proxy_identity(self):
         """Break caught: a client could forge the method proposer in a formula approval record."""

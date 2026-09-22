@@ -367,12 +367,15 @@ class GepStore:
             else:
                 formula_versions.append(dict(formula))
         admission = self.connection.execute(
-            "SELECT accepted FROM data_admissions WHERE data_version=?", (graph["task"]["data_version"],)
+            "SELECT manifest_sha256,accepted FROM data_admissions WHERE data_version=?", (graph["task"]["data_version"],)
         ).fetchone()
         if admission is None or not bool(admission["accepted"]):
             blocking.append(f"data_version:{graph['task']['data_version']}")
         if blocking:
             raise SnapshotBlocked(blocking)
+        graph["data_admission"] = {
+            "data_version": graph["task"]["data_version"], "manifest_sha256": admission["manifest_sha256"],
+        }
         graph["formula_versions"] = formula_versions
         snapshot_id = uuid.uuid4().hex
         graph_json = json.dumps(graph, ensure_ascii=False, sort_keys=True)
@@ -412,6 +415,53 @@ class GepStore:
             )
             self._event(snapshot["task_id"], None, "run.blocked", {"run_id": run_id, "reason": reason})
         return {"run_id": run_id, "status": "blocked", "reason": reason}
+
+    def snapshot_export(self, snapshot_id: str) -> dict[str, Any]:
+        """Build a self-hashing audit envelope from one immutable frozen snapshot."""
+        snapshot = self.connection.execute(
+            "SELECT snapshot_id,task_id,graph_json,created_utc FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+        ).fetchone()
+        if snapshot is None:
+            raise KeyError("snapshot not found")
+        graph = json.loads(snapshot["graph_json"])
+        node_reviews = []
+        for node in graph["nodes"]:
+            review = self.connection.execute(
+                "SELECT review_id,node_id,version,decision,reviewer,note,created_utc FROM reviews "
+                "WHERE node_id=? AND version=? ORDER BY created_utc",
+                (node["node_id"], node["version"]),
+            ).fetchone()
+            if review is not None:
+                node_reviews.append({"node_key": node["node_key"], "review": dict(review)})
+        formula_versions = graph.get("formula_versions", [])
+        formula_reviews = []
+        for formula in formula_versions:
+            rows = self.connection.execute(
+                "SELECT formula_review_id,formula_version_id,review_version,decision,reviewer,note,created_utc "
+                "FROM formula_reviews WHERE formula_version_id=? ORDER BY created_utc",
+                (formula["formula_version_id"],),
+            ).fetchall()
+            formula_reviews.append({
+                "formula_version_id": formula["formula_version_id"], "reviews": [dict(row) for row in rows],
+            })
+        exported = {
+            "schema_version": 1,
+            "scope": "frozen_snapshot_audit",
+            "snapshot_id": snapshot["snapshot_id"],
+            "task_id": snapshot["task_id"],
+            "snapshot_created_utc": snapshot["created_utc"],
+            "input_graph_sha256": hashlib.sha256(snapshot["graph_json"].encode("utf-8")).hexdigest(),
+            "formal_gep_value": None,
+            "frozen_graph": graph,
+            "data_admission": graph.get("data_admission"),
+            "node_reviews": node_reviews,
+            "formula_versions": formula_versions,
+            "formula_reviews": formula_reviews,
+        }
+        exported["export_sha256"] = hashlib.sha256(
+            json.dumps(exported, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return exported
 
     def propose_formula_version(
         self, indicator_id: str, data_version: str, parameter_manifest_sha256: str, source_id: str,

@@ -84,6 +84,9 @@ class DemoApi:
                     return self._response(start_response, 200, self.store.run(run_id))
                 if method == "GET" and parts[2:] == ["chain"]:
                     return self._response(start_response, 200, self.store.run_chain(run_id))
+            if len(parts) >= 2 and parts[0] == "snapshots":
+                if method == "GET" and parts[2:] == ["export"]:
+                    return self._response(start_response, 200, self.store.snapshot_export(parts[1]))
             if len(parts) >= 2 and parts[0] == "tasks":
                 task_id = parts[1]
                 if method == "GET" and parts[2:] == ["graph"]:
