@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .methods import method_cards
+from .runs import evaluate_frozen_graph
 
 
 INDICATORS = (
@@ -603,21 +604,35 @@ class GepStore:
         if existing is not None:
             return dict(existing)
         run_id = uuid.uuid4().hex
-        reason = "deterministic calculation engine is not yet configured for this snapshot"
+        graph = json.loads(snapshot["graph_json"])
+        evaluation = evaluate_frozen_graph(graph)
+        calculation = {
+            "formal_gep_value_yuan": evaluation.formal_gep_value_yuan,
+            "item_results": evaluation.item_results,
+            "partial_category_totals_yuan": evaluation.partial_category_totals_yuan,
+            "blocking_nodes": evaluation.blocking_nodes,
+        }
+        status = "succeeded" if evaluation.formal_gep_value_yuan is not None else "blocked"
+        reason = (
+            "formal GEP calculation completed"
+            if status == "succeeded"
+            else f"formal GEP remains blocked by {len(evaluation.blocking_nodes)} deterministic calculation requirements"
+        )
         chain = {
             "snapshot_id": snapshot_id,
             "input_graph_sha256": hashlib.sha256(snapshot["graph_json"].encode("utf-8")).hexdigest(),
-            "status": "blocked",
+            "status": status,
             "reason": reason,
+            "calculation": calculation,
         }
         with self.connection:
             self.connection.execute(
                 "INSERT INTO runs VALUES (?,?,?,?,?,?,?,?)",
-                (run_id, snapshot_id, None, idempotency_key, "blocked", reason,
+                (run_id, snapshot_id, None, idempotency_key, status, reason,
                  json.dumps(chain, ensure_ascii=False, sort_keys=True), _utc_now()),
             )
-            self._event(snapshot["task_id"], None, "run.blocked", {"run_id": run_id, "reason": reason})
-        return {"run_id": run_id, "status": "blocked", "reason": reason}
+            self._event(snapshot["task_id"], None, f"run.{status}", {"run_id": run_id, "reason": reason})
+        return {"run_id": run_id, "status": status, "reason": reason}
 
     def snapshot_export(self, snapshot_id: str) -> dict[str, Any]:
         """Build a self-hashing audit envelope from one immutable frozen snapshot."""

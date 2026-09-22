@@ -260,8 +260,43 @@ class TaskServiceTests(unittest.TestCase):
 
         self.assertEqual(first["run_id"], retried["run_id"])
         self.assertEqual(first["status"], "blocked")
-        self.assertEqual(first["reason"], "deterministic calculation engine is not yet configured for this snapshot")
+        self.assertTrue(first["reason"])
         self.assertEqual(len(events), 1)
+
+    def test_run_chain_records_partial_calculation_and_exact_formal_blockers(self):
+        """Break caught: a blocked run could discard available deterministic results or invent a total."""
+        self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        values = {
+            "P1.maize.quantity": (10_000, "t/a"),
+            "P1.maize.producer_price": (100, "元/t"),
+            "P1.maize.intermediate_cost": (300_000, "元/a"),
+            "P1.maize.labor": (200_000, "元/a"),
+            "P1.maize.depreciation": (80_000, "元/a"),
+            "P1.maize.tax_net": (20_000, "元/a"),
+            "P1.maize.capital_return": (50_000, "元/a"),
+        }
+        for node_key, (value, unit) in values.items():
+            self.store.connection.execute(
+                "UPDATE nodes SET value_json=?,unit=? WHERE task_id=? AND node_key=?",
+                (str(value), unit, task["task_id"], node_key),
+            )
+        self.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
+        snapshot = self.store.create_snapshot(task["task_id"])
+
+        run = self.store.create_run(snapshot["snapshot_id"], "partial-run-1")
+        chain = self.store.run_chain(run["run_id"])
+
+        self.assertEqual(run["status"], "blocked")
+        self.assertIsNone(chain["calculation"]["formal_gep_value_yuan"])
+        self.assertEqual(chain["calculation"]["item_results"]["P1"]["value_yuan"], 350_000)
+        self.assertIn("P4:method_implementation_pending", chain["calculation"]["blocking_nodes"])
 
     def test_review_requires_current_node_version(self):
         task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
