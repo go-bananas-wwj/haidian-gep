@@ -1,5 +1,7 @@
 import hashlib
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,6 +46,24 @@ class IncompleteTaskDeliveryTests(unittest.TestCase):
                     export_incomplete_task_delivery(store, task["task_id"], output)
             finally:
                 store.close()
+
+    def test_cli_exports_a_new_truthful_delivery_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "tasks.sqlite3"
+            store = GepStore(database)
+            try:
+                task = store.create_task("110108", 2024, "pending-confirmation", "GB/T 46869-2025", "reference-2024-v0.1")
+            finally:
+                store.close()
+            output = Path(directory) / "cli-delivery"
+
+            completed = subprocess.run(
+                [sys.executable, "scripts/export_delivery.py", "--database", str(database), "--task", task["task_id"], "--out", str(output)],
+                cwd=Path(__file__).parents[1], capture_output=True, text=True, check=True,
+            )
+
+            self.assertIn("formal_gep_value=null", completed.stdout)
+            self.assertTrue((output / "checksums.sha256").is_file())
 
 
 if __name__ == "__main__":
