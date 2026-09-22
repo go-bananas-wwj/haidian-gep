@@ -43,6 +43,16 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("/data-versions/", page)
         self.assertIn("accounting_ready", page)
 
+    def test_canvas_keeps_layout_state_outside_the_accounting_graph(self):
+        """Break caught: panning, zooming, collapsing, or moving a card could mutate audited inputs."""
+        page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("localStorage", page)
+        self.assertIn("view-layout", page)
+        self.assertIn("折叠全部", page)
+        self.assertIn("pointerdown", page)
+        self.assertIn("style.zoom", page)
+
 
 if __name__ == "__main__":
     unittest.main()
