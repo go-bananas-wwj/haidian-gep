@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -46,12 +47,30 @@ class DemoApi:
         start_response("200 OK", [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(html)))])
         return [html]
 
+    @staticmethod
+    def _asset_response(start_response: Callable, asset: Path):
+        content_type = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
+        if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
+            content_type = f"{content_type}; charset=utf-8"
+        data = asset.read_bytes()
+        start_response("200 OK", [("Content-Type", content_type), ("Content-Length", str(len(data)))])
+        return [data]
+
     def __call__(self, environ: dict[str, Any], start_response: Callable):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "")
+        # The production proxy keeps API requests under /api while the local
+        # single-process demo serves the same contract directly.  Supporting
+        # both paths makes the canvas runnable in either arrangement.
+        if path == "/api":
+            path = "/"
+        elif path.startswith("/api/"):
+            path = path[4:]
         parts = [part for part in path.split("/") if part]
         try:
             if method == "GET" and path == "/":
                 return self._html_response(start_response, (Path(__file__).parent / "web" / "index.html").read_bytes())
+            if method == "GET" and len(parts) == 1 and parts[0] in {"styles.css", "api.js", "graph.js", "map.js", "app.js"}:
+                return self._asset_response(start_response, Path(__file__).parent / "web" / parts[0])
             if method == "GET" and path == "/health":
                 return self._response(start_response, 200, {"status": "ok"})
             if method == "GET" and parts == ["indicator-catalog"]:
