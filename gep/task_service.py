@@ -257,6 +257,32 @@ class GepStore:
                 blocking.append(node["node_key"])
         return blocking
 
+    def _formal_blockers(self, graph: dict[str, Any]) -> list[str]:
+        """Return the same complete gate set used before freezing a formal snapshot."""
+        nodes = graph["nodes"]
+        indicators = {node["node_key"]: node for node in nodes if node["kind"] == "indicator"}
+        blocking = self._node_blockers(nodes)
+        for indicator_id, indicator in indicators.items():
+            if indicator["applicability_status"] != "applicable":
+                continue
+            formula = self.connection.execute(
+                "SELECT 1 FROM formula_versions WHERE indicator_id=? AND data_version=? AND status='approved' LIMIT 1",
+                (indicator_id, graph["task"]["data_version"]),
+            ).fetchone()
+            if formula is None:
+                blocking.append(f"formula_version:{indicator_id}")
+        admission = self.connection.execute(
+            "SELECT accepted FROM data_admissions WHERE data_version=?", (graph["task"]["data_version"],)
+        ).fetchone()
+        if admission is None or not bool(admission["accepted"]):
+            blocking.append(f"data_version:{graph['task']['data_version']}")
+        boundary = self.connection.execute(
+            "SELECT accepted FROM boundary_admissions WHERE boundary_version=?", (graph["task"]["boundary_version"],)
+        ).fetchone()
+        if boundary is None or not bool(boundary["accepted"]):
+            blocking.append(f"boundary_version:{graph['task']['boundary_version']}")
+        return blocking
+
     def list_tasks(self) -> list[dict[str, Any]]:
         """Return persistent task-center summaries without creating or changing a task."""
         task_rows = self.connection.execute(
@@ -280,6 +306,7 @@ class GepStore:
                 **task,
                 "pending_review_count": sum(node["review_status"] == "pending_review" for node in nodes),
                 "node_blocker_count": len(self._node_blockers(nodes)),
+                "formal_blocker_count": len(self._formal_blockers(graph)),
                 "blocked_supplement_count": blocked_supplements,
                 "latest_run": dict(latest_run) if latest_run is not None else None,
             })
@@ -485,7 +512,7 @@ class GepStore:
         graph = self.graph(task_id)
         nodes = graph["nodes"]
         indicators = {node["node_key"]: node for node in nodes if node["kind"] == "indicator"}
-        blocking = self._node_blockers(nodes)
+        blocking = self._formal_blockers(graph)
         formula_versions: list[dict[str, Any]] = []
         for indicator_id, indicator in indicators.items():
             if indicator["applicability_status"] != "applicable":
@@ -496,21 +523,15 @@ class GepStore:
                 "ORDER BY created_utc DESC LIMIT 1",
                 (indicator_id, graph["task"]["data_version"]),
             ).fetchone()
-            if formula is None:
-                blocking.append(f"formula_version:{indicator_id}")
-            else:
+            if formula is not None:
                 formula_versions.append(dict(formula))
         admission = self.connection.execute(
             "SELECT manifest_sha256,accepted FROM data_admissions WHERE data_version=?", (graph["task"]["data_version"],)
         ).fetchone()
-        if admission is None or not bool(admission["accepted"]):
-            blocking.append(f"data_version:{graph['task']['data_version']}")
         boundary = self.connection.execute(
             "SELECT geometry_sha256,area_km2,crs,accepted FROM boundary_admissions WHERE boundary_version=?",
             (graph["task"]["boundary_version"],),
         ).fetchone()
-        if boundary is None or not bool(boundary["accepted"]):
-            blocking.append(f"boundary_version:{graph['task']['boundary_version']}")
         if blocking:
             raise SnapshotBlocked(blocking)
         graph["data_admission"] = {
