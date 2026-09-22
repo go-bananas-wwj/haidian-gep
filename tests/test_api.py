@@ -84,6 +84,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(blocked_status, 422)
         self.assertIn("P1.maize.quantity", blocked["blocking_nodes"])
 
+    def test_task_readiness_exposes_snapshot_blockers_without_freezing(self):
+        """Break caught: users could learn required fixes only by attempting an irreversible snapshot action."""
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+
+        status, readiness, _ = self.request("GET", f"/tasks/{task['task_id']}/readiness")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(readiness["ready_for_snapshot"])
+        self.assertIn("P1.maize.quantity", readiness["blocking_nodes"])
+        self.assertIn("data_version:reference-2024-v0.1", readiness["blocking_nodes"])
+        self.assertIn("boundary_version:b1", readiness["blocking_nodes"])
+
     def test_task_center_lists_persisted_task_state_and_latest_run(self):
         """Break caught: a refresh could leave users unable to find a persisted task or its blockers."""
         _, first, _ = self.request("POST", "/tasks", {

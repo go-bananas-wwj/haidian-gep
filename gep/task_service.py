@@ -338,6 +338,18 @@ class GepStore:
             })
         return summaries
 
+    def readiness(self, task_id: str) -> dict[str, Any]:
+        """Explain the current formal snapshot gate without creating a snapshot."""
+        graph = self.graph(task_id)
+        blocking = self._formal_blockers(graph)
+        return {
+            "task_id": task_id,
+            "graph_version": graph["task"]["graph_version"],
+            "ready_for_snapshot": not blocking,
+            "blocking_node_count": len(blocking),
+            "blocking_nodes": blocking,
+        }
+
     def _insert_node(
         self, task_id: str, node_key: str, parent_key: str | None, kind: str, label: str, category: str,
         required: bool, value: Any, unit: str | None, evidence: dict[str, Any], acquisition_status: str,

@@ -122,6 +122,8 @@ class DemoApi:
                 task_id = parts[1]
                 if method == "GET" and parts[2:] == ["graph"]:
                     return self._response(start_response, 200, self.store.graph(task_id))
+                if method == "GET" and parts[2:] == ["readiness"]:
+                    return self._response(start_response, 200, self.store.readiness(task_id))
                 if method == "GET" and parts[2:] == ["appendix-e"]:
                     return self._response(start_response, 200, self.store.appendix_e(task_id))
                 if method == "GET" and parts[2:] == ["events"]:
