@@ -16,7 +16,7 @@ publish = ["modelscope-hub==0.4.3"]
 haidian-gep = "gep.__main__:main"
 
 [tool.setuptools]
-packages = ["gep"]
+packages = ["gep", "gep.geo", "gep.formulas"]
 
 [tool.setuptools.package-data]
 gep = ["web/*.html"]
