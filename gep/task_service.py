@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .methods import method_cards
+
 
 INDICATORS = (
     ("P1", "农产品", "material"), ("P2", "林产品", "material"),
@@ -29,6 +31,7 @@ INDICATORS = (
     ("C1", "旅游康养", "cultural"), ("C2", "休闲游憩", "cultural"),
     ("C3", "景观增值", "cultural"),
 )
+METHOD_CARDS = {card.indicator_id: card for card in method_cards()}
 
 
 class ConflictError(ValueError):
@@ -147,7 +150,14 @@ class GepStore:
         for key, label in categories:
             self._insert_node(task_id, key, None, "category", label, key, False, None, None, {}, "ready", "unsubmitted", "pending")
         for key, label, category in INDICATORS:
-            self._insert_node(task_id, key, category, "indicator", label, category, True, None, None, {}, "awaiting_agent", "unsubmitted", "pending")
+            card = METHOD_CARDS[key]
+            self._insert_node(
+                task_id, key, category, "indicator", label, category, True, None, None,
+                {"method_id": card.method_id, "standard_clause": card.standard_clause,
+                 "required_fields": card.required_fields, "applicability_rule": card.applicability_rule,
+                 "deduplication_rule": card.deduplication_rule, "approval_status": card.approval_status},
+                "awaiting_agent", "unsubmitted", "pending",
+            )
         self._insert_node(
             task_id, "P1.maize.quantity", "P1", "input", "玉米产量", "material", True, 2935.1, "t/a",
             {
@@ -157,6 +167,19 @@ class GepStore:
             },
             "acquired", "pending_review", "applicable",
         )
+        for card in method_cards():
+            for field in card.required_fields:
+                if card.indicator_id == "P1" and field == "quantity":
+                    continue
+                node_key = f"P1.maize.{field}" if card.indicator_id == "P1" else f"{card.indicator_id}.{field}"
+                self._insert_node(
+                    task_id, node_key, card.indicator_id, "input", field, next(
+                        category for indicator_id, _, category in INDICATORS if indicator_id == card.indicator_id
+                    ), True, None, None,
+                    {"method_id": card.method_id, "standard_clause": card.standard_clause,
+                     "field": field, "source_requirement": "awaiting source acquisition and human review"},
+                    "awaiting_agent", "unsubmitted", "pending",
+                )
         self._event(task_id, None, "task.created", {"indicator_count": len(INDICATORS), "data_version": data_version})
         self.connection.commit()
         return {"task_id": task_id}
@@ -298,9 +321,22 @@ class GepStore:
     def create_snapshot(self, task_id: str) -> dict[str, str]:
         graph = self.graph(task_id)
         nodes = graph["nodes"]
-        blocking = [node["node_key"] for node in nodes if node["required"] and (
-            node["applicability_status"] == "pending" or node["review_status"] != "approved" or node["value"] is None
-        )]
+        indicators = {node["node_key"]: node for node in nodes if node["kind"] == "indicator"}
+        blocking: list[str] = []
+        for node in nodes:
+            if not node["required"]:
+                continue
+            if node["kind"] == "indicator":
+                if node["applicability_status"] not in {"applicable", "not_applicable", "verified_zero"}:
+                    blocking.append(node["node_key"])
+                elif node["review_status"] != "approved":
+                    blocking.append(node["node_key"])
+                continue
+            parent = indicators.get(node["parent_key"])
+            if parent is not None and parent["applicability_status"] in {"not_applicable", "verified_zero"}:
+                continue
+            if node["review_status"] != "approved" or node["value"] is None:
+                blocking.append(node["node_key"])
         admission = self.connection.execute(
             "SELECT accepted FROM data_admissions WHERE data_version=?", (graph["task"]["data_version"],)
         ).fetchone()

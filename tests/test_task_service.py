@@ -36,6 +36,19 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(maize["evidence"]["printed_page"], 71)
         self.assertNotIn("synthetic", str(maize).lower())
 
+    def test_task_expands_method_cards_into_required_input_nodes_without_inventing_values(self):
+        """Break caught: the graph could show 22 headings while omitting their actual data requirements."""
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        graph = self.store.graph(task["task_id"])
+        nodes = {node["node_key"]: node for node in graph["nodes"]}
+
+        self.assertEqual(nodes["P1"]["evidence"]["method_id"], "material.residual_value.v1")
+        self.assertEqual(nodes["R6"]["evidence"]["standard_clause"], "A.34--A.54")
+        self.assertEqual(nodes["P1.maize.producer_price"]["value"], None)
+        self.assertEqual(nodes["P1.maize.producer_price"]["acquisition_status"], "awaiting_agent")
+        self.assertEqual(nodes["R4.inland_boundary_evidence"]["parent_key"], "R4")
+        self.assertEqual(nodes["C2.hourly_wage"]["parent_key"], "C2")
+
     def test_snapshot_is_blocked_by_unreviewed_and_missing_inputs(self):
         task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
 
@@ -77,6 +90,28 @@ class TaskServiceTests(unittest.TestCase):
         """Break caught: a caller could launch a calculation without frozen reviewed inputs."""
         with self.assertRaises(KeyError):
             self.store.create_run("missing-snapshot", "request-1")
+
+    def test_not_applicable_indicator_does_not_require_its_valuation_inputs_in_snapshot(self):
+        """Break caught: an approved inland non-applicability conclusion still demanded impossible coastal values."""
+        self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json=NULL, review_status='unsubmitted', applicability_status='pending' WHERE task_id=? AND node_key='R4.inland_boundary_evidence'",
+            (task["task_id"],),
+        )
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json=NULL, review_status='approved', applicability_status='not_applicable' WHERE task_id=? AND node_key='R4'",
+            (task["task_id"],),
+        )
+        self.store.connection.commit()
+
+        snapshot = self.store.create_snapshot(task["task_id"])
+
+        self.assertTrue(snapshot["snapshot_id"])
 
     def test_run_request_is_idempotent_for_a_frozen_snapshot(self):
         """Break caught: reconnecting clients could create duplicate calculation runs."""
