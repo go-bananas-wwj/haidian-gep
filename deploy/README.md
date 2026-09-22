@@ -16,6 +16,8 @@ curl --fail http://127.0.0.1:9088/api/health
 
 API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0.0.1:9088`，经 `/api/` 代理访问 API，不会启动第二个 SQLite 写进程。`data/` 以只读方式挂载进 API 容器，容器不能改写准入原件或清洗数据。`9088` 是用户于 2026-09-22 批准的入口；在反向代理、访问控制和 TLS 经过主机核查前，不得将其公开到互联网。
 
+`task-worker` 是同一 Compose 项目中唯一的补充执行器，不发布宿主机端口。`POST /tasks/{id}/supplement` 只将带幂等键的请求写为 `queued`；worker 从同一 SQLite 运行时卷原子认领为 `running`，然后写入 `completed_pending_review`、`blocked`、`failed` 或 `stale` 事件。容器或浏览器重启不会抹去已排队任务。候选与人工新版本冲突时作业保留为 `stale`，不覆盖节点。
+
 编排文件会先等待 API 的 `/health` 成功，再启动 Web 代理。单服务重建期间可短暂返回 `502`；探测与发布脚本应采用带重试的健康检查，而不是把该启动窗口误判为故障。
 
 ## Dify

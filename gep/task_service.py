@@ -10,7 +10,7 @@ import hashlib
 import math
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -33,6 +33,7 @@ INDICATORS = (
     ("C3", "景观增值", "cultural"),
 )
 METHOD_CARDS = {card.indicator_id: card for card in method_cards()}
+SUPPLEMENT_RECOVERY_SECONDS = 300
 
 
 class ConflictError(ValueError):
@@ -109,6 +110,7 @@ class GepStore:
                 job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                 node_id TEXT NOT NULL REFERENCES nodes(node_id), idempotency_key TEXT NOT NULL,
                 status TEXT NOT NULL, reason TEXT NOT NULL, created_utc TEXT NOT NULL,
+                updated_utc TEXT NOT NULL DEFAULT '', attempt_count INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(task_id, node_id, idempotency_key)
             );
             CREATE TABLE IF NOT EXISTS data_admissions (
@@ -153,6 +155,11 @@ class GepStore:
         boundary_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(boundary_admissions)")}
         if "registered_by" not in boundary_columns:
             self.connection.execute("ALTER TABLE boundary_admissions ADD COLUMN registered_by TEXT NOT NULL DEFAULT 'legacy_unknown'")
+        supplement_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(supplement_jobs)")}
+        if "updated_utc" not in supplement_columns:
+            self.connection.execute("ALTER TABLE supplement_jobs ADD COLUMN updated_utc TEXT NOT NULL DEFAULT ''")
+        if "attempt_count" not in supplement_columns:
+            self.connection.execute("ALTER TABLE supplement_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0")
         self.connection.commit()
 
     def register_data_admission(self, data_version: str, manifest_sha256: str, accepted: bool, registered_by: str = "system") -> dict[str, Any]:
@@ -604,6 +611,7 @@ class GepStore:
         }
 
     def request_supplement(self, task_id: str, node_id: str, idempotency_key: str) -> dict[str, str]:
+        """Persist a supplement request; a separate worker performs the workflow call."""
         if not idempotency_key.strip():
             raise ValueError("idempotency_key is required")
         node = self._node_by_id(node_id)
@@ -616,19 +624,104 @@ class GepStore:
         if existing is not None:
             return {key: existing[key] for key in ("job_id", "status", "reason")}
         job_id = uuid.uuid4().hex
+        now = _utc_now()
+        reason = "queued for configured supplement worker"
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO supplement_jobs (job_id,task_id,node_id,idempotency_key,status,reason,created_utc,updated_utc,attempt_count) VALUES (?,?,?,?,?,?,?,?,?)",
+                (job_id, task_id, node_id, idempotency_key, "queued", reason, now, now, 0),
+            )
+            self.connection.execute(
+                "UPDATE nodes SET acquisition_status='agent_queued' WHERE node_id=? AND value_json IS NULL", (node_id,)
+            )
+            self._event(task_id, node_id, "supplement.queued", {"job_id": job_id})
+        return {"job_id": job_id, "status": "queued", "reason": reason}
+
+    def supplement_job(self, job_id: str) -> dict[str, Any]:
+        row = self.connection.execute("SELECT * FROM supplement_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if row is None:
+            raise KeyError("supplement job not found")
+        return dict(row)
+
+    def _requeue_interrupted_supplements(self) -> None:
+        """Return abandoned running jobs to the durable queue after a worker interruption."""
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=SUPPLEMENT_RECOVERY_SECONDS)
+        running = self.connection.execute(
+            "SELECT job_id,task_id,node_id,updated_utc FROM supplement_jobs WHERE status='running'"
+        ).fetchall()
+        interrupted = []
+        for job in running:
+            try:
+                updated = datetime.fromisoformat(job["updated_utc"])
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                updated = datetime.min.replace(tzinfo=timezone.utc)
+            if updated <= cutoff:
+                interrupted.append(job)
+        if not interrupted:
+            return
+        now = _utc_now()
+        with self.connection:
+            for job in interrupted:
+                requeued = self.connection.execute(
+                    "UPDATE supplement_jobs SET status='queued',reason='requeued after interrupted worker',updated_utc=? WHERE job_id=? AND status='running'",
+                    (now, job["job_id"]),
+                )
+                if requeued.rowcount == 1:
+                    self.connection.execute(
+                        "UPDATE nodes SET acquisition_status='agent_queued' WHERE node_id=? AND value_json IS NULL",
+                        (job["node_id"],),
+                    )
+                    self._event(job["task_id"], job["node_id"], "supplement.requeued", {"job_id": job["job_id"]})
+
+    def process_next_supplement(self) -> dict[str, Any] | None:
+        """Atomically claim the oldest queued request and process it in this worker."""
+        self._requeue_interrupted_supplements()
+        candidate = self.connection.execute(
+            "SELECT * FROM supplement_jobs WHERE status='queued' ORDER BY created_utc,job_id LIMIT 1"
+        ).fetchone()
+        if candidate is None:
+            return None
+        now = _utc_now()
+        with self.connection:
+            claimed = self.connection.execute(
+                "UPDATE supplement_jobs SET status='running',reason='workflow execution started',updated_utc=?,attempt_count=attempt_count+1 WHERE job_id=? AND status='queued'",
+                (now, candidate["job_id"]),
+            )
+            if claimed.rowcount != 1:
+                return None
+            self.connection.execute(
+                "UPDATE nodes SET acquisition_status='agent_running' WHERE node_id=? AND value_json IS NULL", (candidate["node_id"],)
+            )
+            self._event(candidate["task_id"], candidate["node_id"], "supplement.running", {"job_id": candidate["job_id"]})
+        return self.process_supplement(candidate["job_id"])
+
+    def process_supplement(self, job_id: str) -> dict[str, Any]:
+        """Run one claimed job and persist only a validated, review-required candidate."""
+        job = self.connection.execute("SELECT * FROM supplement_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if job is None:
+            raise KeyError("supplement job not found")
+        if job["status"] != "running":
+            return dict(job)
+        task_id, node_id = job["task_id"], job["node_id"]
+        node = self._node_by_id(node_id)
         try:
             candidate = self._candidate_from_workflow(self.supplement_workflow.run(self._supplement_work_order(task_id, node)))
         except (OSError, RuntimeError, ValueError) as error:
             reason = str(error)
-            acquisition_status = "awaiting_agent" if "not configured" in reason else "agent_failed"
+            is_unconfigured = "not configured" in reason
+            status = "blocked" if is_unconfigured else "failed"
+            acquisition_status = "awaiting_agent" if is_unconfigured else "agent_failed"
+            event_type = "supplement.blocked" if is_unconfigured else "supplement.failed"
             with self.connection:
                 self.connection.execute(
-                    "INSERT INTO supplement_jobs VALUES (?,?,?,?,?,?,?)",
-                    (job_id, task_id, node_id, idempotency_key, "blocked", reason, _utc_now()),
+                    "UPDATE supplement_jobs SET status=?,reason=?,updated_utc=? WHERE job_id=?",
+                    (status, reason, _utc_now(), job_id),
                 )
                 self.connection.execute("UPDATE nodes SET acquisition_status=? WHERE node_id=?", (acquisition_status, node_id))
-                self._event(task_id, node_id, "supplement.blocked", {"job_id": job_id, "reason": reason})
-            return {"job_id": job_id, "status": "blocked", "reason": reason}
+                self._event(task_id, node_id, event_type, {"job_id": job_id, "reason": reason})
+            return {"job_id": job_id, "status": status, "reason": reason}
 
         current_evidence = json.loads(node["evidence_json"])
         candidate_evidence = {
@@ -639,23 +732,32 @@ class GepStore:
         }
         combined_evidence = {"original": current_evidence, "current": candidate_evidence}
         next_version = node["version"] + 1
-        with self.connection:
-            self.connection.execute(
-                "INSERT INTO supplement_jobs VALUES (?,?,?,?,?,?,?)",
-                (job_id, task_id, node_id, idempotency_key, "completed_pending_review", "candidate persisted; human review required", _utc_now()),
-            )
-            updated = self.connection.execute(
-                "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,acquisition_status='candidate_ready',review_status='pending_review',version=? WHERE node_id=? AND version=?",
-                (json.dumps(candidate["value"], ensure_ascii=False, allow_nan=False), candidate["unit"],
-                 json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
-            )
-            if updated.rowcount != 1:
-                raise ConflictError("node version is stale")
-            self._bump_graph_version(task_id)
-            self._event(task_id, node_id, "supplement.candidate_persisted", {
-                "job_id": job_id, "version": next_version, "source_id": candidate["evidence"]["source_id"],
-                "source_sha256": candidate["evidence"]["source_sha256"], "tool_run_id": candidate["evidence"]["tool_run_id"],
-            })
+        try:
+            with self.connection:
+                self.connection.execute(
+                    "UPDATE supplement_jobs SET status='completed_pending_review',reason='candidate persisted; human review required',updated_utc=? WHERE job_id=? AND status='running'",
+                    (_utc_now(), job_id),
+                )
+                updated = self.connection.execute(
+                    "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,acquisition_status='candidate_ready',review_status='pending_review',version=? WHERE node_id=? AND version=?",
+                    (json.dumps(candidate["value"], ensure_ascii=False, allow_nan=False), candidate["unit"],
+                     json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
+                )
+                if updated.rowcount != 1:
+                    raise ConflictError("node version is stale")
+                self._bump_graph_version(task_id)
+                self._event(task_id, node_id, "supplement.candidate_persisted", {
+                    "job_id": job_id, "version": next_version, "source_id": candidate["evidence"]["source_id"],
+                    "source_sha256": candidate["evidence"]["source_sha256"], "tool_run_id": candidate["evidence"]["tool_run_id"],
+                })
+        except ConflictError as error:
+            with self.connection:
+                self.connection.execute(
+                    "UPDATE supplement_jobs SET status='stale',reason=?,updated_utc=? WHERE job_id=?",
+                    (str(error), _utc_now(), job_id),
+                )
+                self._event(task_id, node_id, "supplement.stale", {"job_id": job_id, "reason": str(error)})
+            return {"job_id": job_id, "status": "stale", "reason": str(error)}
         return {"job_id": job_id, "status": "completed_pending_review", "reason": "candidate persisted; human review required"}
 
     def create_snapshot(self, task_id: str) -> dict[str, str]:

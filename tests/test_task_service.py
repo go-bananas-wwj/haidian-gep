@@ -78,6 +78,13 @@ class TaskServiceTests(unittest.TestCase):
         node = self.store.node(task["task_id"], "P1.maize.producer_price")
 
         job = self.store.request_supplement(task["task_id"], node["node_id"], "price-request-1")
+        queued = self.store.node(task["task_id"], "P1.maize.producer_price")
+
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(queued["value"], None)
+        self.assertEqual(queued["acquisition_status"], "agent_queued")
+
+        job = self.store.process_next_supplement()
 
         current = self.store.node(task["task_id"], "P1.maize.producer_price")
         self.assertEqual(job["status"], "completed_pending_review")
@@ -115,15 +122,36 @@ class TaskServiceTests(unittest.TestCase):
         task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
         node = self.store.node(task["task_id"], "P1.maize.producer_price")
         try:
-            with self.assertRaises(ConflictError):
-                self.store.request_supplement(task["task_id"], node["node_id"], "price-request-race")
+            self.store.request_supplement(task["task_id"], node["node_id"], "price-request-race")
+            job = self.store.process_next_supplement()
         finally:
             concurrent.close()
 
         current = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.assertEqual(job["status"], "stale")
         self.assertEqual(current["value"], 2050)
         jobs = self.store.connection.execute("SELECT * FROM supplement_jobs").fetchall()
-        self.assertEqual(jobs, [])
+        self.assertEqual(jobs[0]["status"], "stale")
+
+    def test_worker_records_a_configured_workflow_failure_without_creating_a_candidate(self):
+        """Break caught: a source or permission failure could be mislabeled as an ordinary configuration block."""
+        class Workflow:
+            def run(self, _work_order):
+                raise RuntimeError("Dify workflow HTTP 403; no candidate was generated")
+
+        self.store.close()
+        self.store = GepStore(Path(self.directory.name) / "tasks.sqlite3", supplement_workflow=Workflow())
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.store.request_supplement(task["task_id"], node["node_id"], "price-request-failure")
+
+        job = self.store.process_next_supplement()
+        current = self.store.node(task["task_id"], "P1.maize.producer_price")
+
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(current["value"], None)
+        self.assertEqual(current["acquisition_status"], "agent_failed")
+        self.assertIn("supplement.failed", [event["type"] for event in self.store.events(task["task_id"])])
 
     def test_existing_task_database_migrates_to_include_graph_version(self):
         """Break caught: the deployed pre-versioned SQLite task table could not support task-center summaries."""

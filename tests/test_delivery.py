@@ -65,6 +65,7 @@ class IncompleteTaskDeliveryTests(unittest.TestCase):
                 task = store.create_task("110108", 2024, "pending-confirmation", "GB/T 46869-2025", "reference-2024-v0.1")
                 node = store.node(task["task_id"], "P1.maize.producer_price")
                 store.request_supplement(task["task_id"], node["node_id"], "price-request-1")
+                store.process_next_supplement()
                 output = Path(directory) / "delivery"
 
                 manifest = export_incomplete_task_delivery(store, task["task_id"], output)

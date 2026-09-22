@@ -22,6 +22,22 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  task-worker:
+    build: ..
+    command: ["worker", "--database", "/var/lib/haidian-gep/tasks.sqlite3"]
+    environment:
+      GEP_DATA_ROOT: /var/lib/haidian-gep-data
+      DIFY_API_BASE_URL: ${DIFY_API_BASE_URL:-}
+      DIFY_API_KEY: ${DIFY_API_KEY:-}
+      DIFY_WORK_ORDER_INPUT: ${DIFY_WORK_ORDER_INPUT:-work_order_json}
+      DIFY_CANDIDATE_OUTPUT: ${DIFY_CANDIDATE_OUTPUT:-candidate_json}
+      DIFY_WORKFLOW_USER: ${DIFY_WORKFLOW_USER:-haidian-gep-task-service}
+      DIFY_TIMEOUT_SECONDS: ${DIFY_TIMEOUT_SECONDS:-30}
+    volumes:
+      - ${GEP_RUNTIME_DIR:?Set GEP_RUNTIME_DIR to the persistent runtime directory}:/var/lib/haidian-gep
+      - ${GEP_DATA_DIR:?Set GEP_DATA_DIR to the admitted data directory}:/var/lib/haidian-gep-data:ro
+    restart: unless-stopped
+
   task-web:
     image: nginx:1.27.4-alpine
     ports:

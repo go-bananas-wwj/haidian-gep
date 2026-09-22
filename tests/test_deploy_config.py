@@ -30,6 +30,16 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("DIFY_API_KEY: ${DIFY_API_KEY:-}", api_section)
         self.assertNotIn("DIFY_API_KEY: sk-", api_section)
 
+    def test_worker_uses_the_same_persistent_runtime_without_publishing_a_port(self):
+        """Break caught: an agent request could run in the API process or a second worker could get its own state."""
+        compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
+        worker_section = compose.split("  task-worker:", 1)[1].split("  task-web:", 1)[0]
+
+        self.assertIn('command: ["worker", "--database", "/var/lib/haidian-gep/tasks.sqlite3"]', worker_section)
+        self.assertNotIn("ports:", worker_section)
+        self.assertIn("${GEP_RUNTIME_DIR:?Set GEP_RUNTIME_DIR to the persistent runtime directory}:/var/lib/haidian-gep", worker_section)
+        self.assertIn("DIFY_API_KEY: ${DIFY_API_KEY:-}", worker_section)
+
     def test_web_waits_for_api_health_before_first_start(self):
         compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
         api_section, web_section = compose.split("  task-web:", 1)
@@ -79,6 +89,14 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("lastEvent", page)
         self.assertIn("事件记录", page)
         self.assertIn("setInterval", page)
+
+    def test_canvas_shows_persisted_agent_queue_and_running_states(self):
+        """Break caught: an accepted async request could still be displayed as a finished candidate."""
+        page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("agent_queued", page)
+        self.assertIn("agent_running", page)
+        self.assertIn("智能体补充中", page)
 
 
 if __name__ == "__main__":

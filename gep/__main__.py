@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from . import catalog, workflow, release, fetch
 from .server import serve
+from .worker import SupplementWorker
 
 
 def main():
@@ -23,12 +24,23 @@ def main():
     s.add_argument('--database', required=True)
     s.add_argument('--host', default='127.0.0.1')
     s.add_argument('--port', type=int, default=8000)
+    s = sub.add_parser('worker', help='process persisted supplement jobs without an HTTP server')
+    s.add_argument('--database', required=True)
+    s.add_argument('--once', action='store_true')
+    s.add_argument('--poll-seconds', type=float, default=1.0)
     args = p.parse_args()
     try:
         if args.command == 'serve':
             serve(args.host, args.port, args.database)
             return
-        if args.command == 'check': result = catalog.check(args.csv)
+        if args.command == 'worker':
+            worker = SupplementWorker(args.database)
+            if args.once:
+                result = worker.run_once() or {'status': 'idle'}
+            else:
+                worker.run_forever(args.poll_seconds)
+                return
+        elif args.command == 'check': result = catalog.check(args.csv)
         elif args.command == 'build':
             result = catalog.build(args.csv); workflow.save(result, args.out)
         elif args.command == 'fetch': result = fetch.download(args.source, args.root)

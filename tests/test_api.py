@@ -339,7 +339,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(event["payload"]["operator"], "verified-proxy-user")
 
-    def test_supplement_is_idempotent_and_reports_unconfigured_dify_as_blocked(self):
+    def test_supplement_is_idempotent_then_worker_records_unconfigured_dify_as_blocked(self):
         _, task, _ = self.request("POST", "/tasks", {
             "region_code": "110108", "year": 2024, "boundary_version": "b1",
             "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
@@ -354,8 +354,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(first_status, 202)
         self.assertEqual(second_status, 202)
         self.assertEqual(first["job_id"], second["job_id"])
-        self.assertEqual(first["status"], "blocked")
-        self.assertIn("Dify", first["reason"])
+        self.assertEqual(first["status"], "queued")
+
+        completed = self.app.store.process_next_supplement()
+
+        self.assertEqual(completed["status"], "blocked")
+        self.assertIn("Dify", completed["reason"])
 
     def test_run_endpoint_records_a_blocked_run_from_a_frozen_snapshot(self):
         """Break caught: the browser could not request the persisted run required by the task contract."""
