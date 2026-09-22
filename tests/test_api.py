@@ -84,6 +84,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(blocked_status, 422)
         self.assertIn("P1.maize.quantity", blocked["blocking_nodes"])
 
+    def test_appendix_e_keeps_an_incomplete_task_at_null_formal_gep(self):
+        """Break caught: an incomplete task could hide indicator gaps or invent a formal total."""
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+
+        status, appendix, _ = self.request("GET", f"/tasks/{task['task_id']}/appendix-e")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(appendix["formal_gep_value"], None)
+        self.assertEqual(appendix["row_count"], 22)
+        self.assertEqual(len(appendix["rows"]), 22)
+        maize = next(row for row in appendix["rows"] if row["indicator_id"] == "P1")
+        self.assertEqual(maize["category"], "material")
+        maize_quantity = next(node for node in maize["input_nodes"] if node["node_key"] == "P1.maize.quantity")
+        self.assertEqual(maize_quantity["value"], 2935.1)
+        self.assertIn("P1", maize["blocking_nodes"])
+
     def test_data_version_catalog_exposes_a_verified_blocked_reference_package(self):
         """Break caught: the canvas could call a reference package accounting-ready without its manifest or gaps."""
         list_status, listing, _ = self.request("GET", "/data-versions")

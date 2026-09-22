@@ -260,6 +260,66 @@ class GepStore:
         rows = self.connection.execute("SELECT * FROM nodes WHERE task_id=? ORDER BY kind,node_key", (task_id,)).fetchall()
         return {"task": dict(task), "nodes": [self._node_dict(row) for row in rows]}
 
+    def appendix_e(self, task_id: str) -> dict[str, Any]:
+        """Return the current 22-indicator Appendix E view without calculating a GEP total.
+
+        This is intentionally a live completeness report, rather than an export from
+        a frozen snapshot.  It makes every missing or unreviewed input visible while
+        preserving the rule that no formal total exists before a valid run.
+        """
+        graph = self.graph(task_id)
+        nodes = graph["nodes"]
+        indicators = {node["node_key"]: node for node in nodes if node["kind"] == "indicator"}
+        inputs_by_indicator: dict[str, list[dict[str, Any]]] = {}
+        for node in nodes:
+            if node["kind"] == "input":
+                inputs_by_indicator.setdefault(node["parent_key"], []).append(node)
+
+        rows = []
+        for indicator_id, label, category in INDICATORS:
+            indicator = indicators[indicator_id]
+            input_nodes = inputs_by_indicator.get(indicator_id, [])
+            blocking_nodes = []
+            if indicator["applicability_status"] not in {"applicable", "not_applicable", "verified_zero"}:
+                blocking_nodes.append(indicator_id)
+            elif indicator["review_status"] != "approved":
+                blocking_nodes.append(indicator_id)
+            if indicator["applicability_status"] not in {"not_applicable", "verified_zero"}:
+                for input_node in input_nodes:
+                    if input_node["review_status"] != "approved" or input_node["value"] is None:
+                        blocking_nodes.append(input_node["node_key"])
+            rows.append({
+                "indicator_id": indicator_id,
+                "label": label,
+                "category": category,
+                "applicability_status": indicator["applicability_status"],
+                "review_status": indicator["review_status"],
+                "method": indicator["evidence"],
+                "input_nodes": [{
+                    "node_key": input_node["node_key"], "label": input_node["label"],
+                    "value": input_node["value"], "unit": input_node["unit"],
+                    "acquisition_status": input_node["acquisition_status"],
+                    "review_status": input_node["review_status"], "evidence": input_node["evidence"],
+                } for input_node in input_nodes],
+                "value_yuan": None,
+                "blocking_nodes": blocking_nodes,
+                "status": "blocked" if blocking_nodes else "ready_for_run",
+            })
+        task = graph["task"]
+        return {
+            "schema_version": 1,
+            "report_type": "appendix_e_incomplete_current_task",
+            "task_id": task_id,
+            "region_code": task["region_code"],
+            "year": task["year"],
+            "boundary_version": task["boundary_version"],
+            "standard_version": task["standard_version"],
+            "data_version": task["data_version"],
+            "formal_gep_value": None,
+            "row_count": len(rows),
+            "rows": rows,
+        }
+
     def node(self, task_id: str, node_key: str) -> dict[str, Any]:
         row = self.connection.execute("SELECT * FROM nodes WHERE task_id=? AND node_key=?", (task_id, node_key)).fetchone()
         if row is None:
