@@ -58,6 +58,26 @@ class DemoApi:
                 body = self._json_body(environ)
                 run = self.store.create_run(**body)
                 return self._response(start_response, 202, run)
+            if method == "POST" and parts == ["formula-versions"]:
+                proposer = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                if not proposer:
+                    return self._response(start_response, 503, {"error": "trusted formula-proposer identity is not configured"})
+                body = self._json_body(environ)
+                body.pop("proposer", None)
+                return self._response(start_response, 201, self.store.propose_formula_version(proposer=proposer, **body))
+            if len(parts) >= 2 and parts[0] == "formula-versions":
+                formula_version_id = parts[1]
+                if method == "GET" and parts[2:] == ["reviews"]:
+                    return self._response(start_response, 200, {"reviews": self.store.formula_review_history(formula_version_id)})
+                if method == "POST" and parts[2:] == ["reviews"]:
+                    reviewer = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                    if not reviewer:
+                        return self._response(start_response, 503, {"error": "trusted formula-reviewer identity is not configured"})
+                    body = self._json_body(environ)
+                    body.pop("reviewer", None)
+                    return self._response(start_response, 200, self.store.review_formula_version(
+                        formula_version_id, reviewer=reviewer, **body,
+                    ))
             if len(parts) >= 2 and parts[0] == "runs":
                 run_id = parts[1]
                 if method == "GET" and not parts[2:]:

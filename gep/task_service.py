@@ -105,6 +105,21 @@ class GepStore:
                 status TEXT NOT NULL, reason TEXT NOT NULL, chain_json TEXT NOT NULL,
                 created_utc TEXT NOT NULL, UNIQUE(snapshot_id, idempotency_key)
             );
+            CREATE TABLE IF NOT EXISTS formula_versions (
+                formula_version_id TEXT PRIMARY KEY, indicator_id TEXT NOT NULL, data_version TEXT NOT NULL,
+                method_id TEXT NOT NULL, standard_clause TEXT NOT NULL, card_sha256 TEXT NOT NULL,
+                parameter_manifest_sha256 TEXT NOT NULL, source_id TEXT NOT NULL,
+                source_sha256 TEXT NOT NULL, proposer TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+                status TEXT NOT NULL, review_version INTEGER NOT NULL, created_utc TEXT NOT NULL,
+                UNIQUE(indicator_id, data_version, idempotency_key)
+            );
+            CREATE TABLE IF NOT EXISTS formula_reviews (
+                formula_review_id TEXT PRIMARY KEY,
+                formula_version_id TEXT NOT NULL REFERENCES formula_versions(formula_version_id),
+                review_version INTEGER NOT NULL, decision TEXT NOT NULL, reviewer TEXT NOT NULL,
+                note TEXT NOT NULL, created_utc TEXT NOT NULL,
+                UNIQUE(formula_version_id, review_version)
+            );
             """
         )
         self.connection.commit()
@@ -337,6 +352,20 @@ class GepStore:
                 continue
             if node["review_status"] != "approved" or node["value"] is None:
                 blocking.append(node["node_key"])
+        formula_versions: list[dict[str, Any]] = []
+        for indicator_id, indicator in indicators.items():
+            if indicator["applicability_status"] != "applicable":
+                continue
+            formula = self.connection.execute(
+                "SELECT formula_version_id,indicator_id,data_version,method_id,standard_clause,card_sha256,parameter_manifest_sha256,source_id,source_sha256 "
+                "FROM formula_versions WHERE indicator_id=? AND data_version=? AND status='approved' "
+                "ORDER BY created_utc DESC LIMIT 1",
+                (indicator_id, graph["task"]["data_version"]),
+            ).fetchone()
+            if formula is None:
+                blocking.append(f"formula_version:{indicator_id}")
+            else:
+                formula_versions.append(dict(formula))
         admission = self.connection.execute(
             "SELECT accepted FROM data_admissions WHERE data_version=?", (graph["task"]["data_version"],)
         ).fetchone()
@@ -344,6 +373,7 @@ class GepStore:
             blocking.append(f"data_version:{graph['task']['data_version']}")
         if blocking:
             raise SnapshotBlocked(blocking)
+        graph["formula_versions"] = formula_versions
         snapshot_id = uuid.uuid4().hex
         graph_json = json.dumps(graph, ensure_ascii=False, sort_keys=True)
         with self.connection:
@@ -367,7 +397,7 @@ class GepStore:
         if existing is not None:
             return dict(existing)
         run_id = uuid.uuid4().hex
-        reason = "deterministic formula registry is not yet approved for this snapshot"
+        reason = "deterministic calculation engine is not yet configured for this snapshot"
         chain = {
             "snapshot_id": snapshot_id,
             "input_graph_sha256": hashlib.sha256(snapshot["graph_json"].encode("utf-8")).hexdigest(),
@@ -382,6 +412,81 @@ class GepStore:
             )
             self._event(snapshot["task_id"], None, "run.blocked", {"run_id": run_id, "reason": reason})
         return {"run_id": run_id, "status": "blocked", "reason": reason}
+
+    def propose_formula_version(
+        self, indicator_id: str, data_version: str, parameter_manifest_sha256: str, source_id: str,
+        source_sha256: str, proposer: str, idempotency_key: str,
+    ) -> dict[str, Any]:
+        if indicator_id not in METHOD_CARDS:
+            raise ValueError("formula version must reference one of the 22 method cards")
+        for name, value in (("parameter manifest", parameter_manifest_sha256), ("source", source_sha256)):
+            normalized = str(value).lower()
+            if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+                raise ValueError(f"{name} must have a SHA-256 hash")
+        if not all(str(value).strip() for value in (data_version, source_id, proposer, idempotency_key)):
+            raise ValueError("data_version, source_id, proposer, and idempotency_key are required")
+        existing = self.connection.execute(
+            "SELECT * FROM formula_versions WHERE indicator_id=? AND data_version=? AND idempotency_key=?",
+            (indicator_id, data_version, idempotency_key),
+        ).fetchone()
+        if existing is not None:
+            if (
+                existing["parameter_manifest_sha256"] == parameter_manifest_sha256.lower()
+                and existing["source_id"] == source_id
+                and existing["source_sha256"] == source_sha256.lower()
+                and existing["proposer"] == proposer
+            ):
+                return dict(existing)
+            raise ConflictError("formula idempotency key was already used with different content")
+        card = METHOD_CARDS[indicator_id]
+        card_sha256 = hashlib.sha256(json.dumps(card.__dict__, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+        formula_version_id = uuid.uuid4().hex
+        created_utc = _utc_now()
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO formula_versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (formula_version_id, indicator_id, data_version, card.method_id, card.standard_clause, card_sha256,
+                 parameter_manifest_sha256.lower(), source_id, source_sha256.lower(), proposer,
+                 idempotency_key, "pending_review", 1, created_utc),
+            )
+        return self.formula_version(formula_version_id)
+
+    def formula_version(self, formula_version_id: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            "SELECT * FROM formula_versions WHERE formula_version_id=?", (formula_version_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError("formula version not found")
+        return dict(row)
+
+    def review_formula_version(
+        self, formula_version_id: str, expected_version: int, decision: str, reviewer: str, note: str,
+    ) -> dict[str, Any]:
+        if decision not in {"approved", "returned"} or not reviewer.strip() or not note.strip():
+            raise ValueError("decision, reviewer, and note are required")
+        current = self.formula_version(formula_version_id)
+        if current["review_version"] != expected_version or current["status"] != "pending_review":
+            raise ConflictError("formula version is stale or not awaiting review")
+        status = "approved" if decision == "approved" else "returned"
+        with self.connection:
+            updated = self.connection.execute(
+                "UPDATE formula_versions SET status=?,review_version=? WHERE formula_version_id=? AND review_version=? AND status='pending_review'",
+                (status, expected_version + 1, formula_version_id, expected_version),
+            )
+            if updated.rowcount != 1:
+                raise ConflictError("formula version is stale or not awaiting review")
+            self.connection.execute(
+                "INSERT INTO formula_reviews VALUES (?,?,?,?,?,?,?)",
+                (uuid.uuid4().hex, formula_version_id, expected_version, decision, reviewer, note, _utc_now()),
+            )
+        return self.formula_version(formula_version_id)
+
+    def formula_review_history(self, formula_version_id: str) -> list[dict[str, Any]]:
+        self.formula_version(formula_version_id)
+        rows = self.connection.execute(
+            "SELECT * FROM formula_reviews WHERE formula_version_id=? ORDER BY created_utc", (formula_version_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def run(self, run_id: str) -> dict[str, Any]:
         row = self.connection.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()

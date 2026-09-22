@@ -6,6 +6,7 @@ from pathlib import Path
 from wsgiref.util import setup_testing_defaults
 
 from gep.api import make_app
+from gep.task_service import INDICATORS
 
 
 class ApiTests(unittest.TestCase):
@@ -29,6 +30,17 @@ class ApiTests(unittest.TestCase):
         header_map = dict(headers)
         decoded = {"html": payload.decode("utf-8")} if header_map.get("Content-Type") == "text/html; charset=utf-8" else json.loads(payload)
         return int(status[0].split()[0]), decoded, header_map
+
+    def approve_all_formula_versions(self, data_version):
+        """Provide reviewed method/parameter records for a fully admitted test snapshot."""
+        for number, (indicator_id, _, _) in enumerate(INDICATORS, 1):
+            proposal = self.app.store.propose_formula_version(
+                indicator_id, data_version, "a" * 64, f"method-note-{number}", "b" * 64,
+                "analyst", f"request-{number}",
+            )
+            self.app.store.review_formula_version(
+                proposal["formula_version_id"], 1, "approved", "method-reviewer", "verified",
+            )
 
     def test_create_task_returns_real_graph_and_snapshot_blockers(self):
         status, task, _ = self.request("POST", "/tasks", {
@@ -125,6 +137,7 @@ class ApiTests(unittest.TestCase):
             (task["task_id"],),
         )
         self.app.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
         snapshot = self.app.store.create_snapshot(task["task_id"])
 
         status, run, _ = self.request("POST", "/runs", {
@@ -144,6 +157,7 @@ class ApiTests(unittest.TestCase):
             (task["task_id"],),
         )
         self.app.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
         snapshot = self.app.store.create_snapshot(task["task_id"])
         run = self.app.store.create_run(snapshot["snapshot_id"], "run-request-1")
 
@@ -155,6 +169,47 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(chain_code, 200)
         self.assertEqual(chain["snapshot_id"], snapshot["snapshot_id"])
         self.assertEqual(len(chain["input_graph_sha256"]), 64)
+
+    def test_formula_version_proposal_uses_the_trusted_proxy_identity(self):
+        """Break caught: a client could forge the method proposer in a formula approval record."""
+        proposal_status, proposal, _ = self.request("POST", "/formula-versions", {
+            "indicator_id": "R6", "data_version": "audited-2024-v1", "parameter_manifest_sha256": "a" * 64,
+            "source_id": "carbon-method-note", "source_sha256": "b" * 64, "proposer": "forged-client", "idempotency_key": "r6-1",
+        }, actor="verified-method-analyst")
+
+        self.assertEqual(proposal_status, 201)
+        self.assertEqual(proposal["proposer"], "verified-method-analyst")
+
+    def test_formula_version_review_uses_the_trusted_proxy_identity(self):
+        """Break caught: a client could forge the reviewer in a formula approval record."""
+        proposal = self.app.store.propose_formula_version(
+            "R6", "audited-2024-v1", "a" * 64, "carbon-method-note", "b" * 64, "analyst", "r6-1"
+        )
+
+        status, reviewed, _ = self.request("POST", f"/formula-versions/{proposal['formula_version_id']}/reviews", {
+            "expected_version": 1, "decision": "approved", "reviewer": "forged-client", "note": "checked",
+        }, actor="verified-method-reviewer")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(reviewed["status"], "approved")
+        self.assertEqual(
+            self.app.store.formula_review_history(proposal["formula_version_id"])[0]["reviewer"],
+            "verified-method-reviewer",
+        )
+
+    def test_formula_review_history_is_readable_after_refresh(self):
+        """Break caught: a reviewed formula could lose its audit history when the client reconnects."""
+        proposal = self.app.store.propose_formula_version(
+            "R6", "audited-2024-v1", "a" * 64, "carbon-method-note", "b" * 64, "analyst", "r6-1"
+        )
+        self.app.store.review_formula_version(
+            proposal["formula_version_id"], 1, "approved", "method-reviewer", "checked"
+        )
+
+        status, payload, _ = self.request("GET", f"/formula-versions/{proposal['formula_version_id']}/reviews")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["reviews"][0]["reviewer"], "method-reviewer")
 
     def test_root_serves_the_task_canvas(self):
         status, payload, headers = self.request("GET", "/")

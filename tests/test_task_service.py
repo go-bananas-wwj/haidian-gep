@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gep.task_service import ConflictError, GepStore, SnapshotBlocked
+from gep.task_service import INDICATORS, ConflictError, GepStore, SnapshotBlocked
 
 
 class TaskServiceTests(unittest.TestCase):
@@ -15,6 +15,17 @@ class TaskServiceTests(unittest.TestCase):
     def tearDown(self):
         self.store.close()
         self.directory.cleanup()
+
+    def approve_all_formula_versions(self, data_version):
+        """Provide reviewed method/parameter records for a fully admitted test snapshot."""
+        for number, (indicator_id, _, _) in enumerate(INDICATORS, 1):
+            proposal = self.store.propose_formula_version(
+                indicator_id, data_version, "a" * 64, f"method-note-{number}", "b" * 64,
+                "analyst", f"request-{number}",
+            )
+            self.store.review_formula_version(
+                proposal["formula_version_id"], 1, "approved", "method-reviewer", "verified",
+            )
 
     def test_new_task_creates_all_22_indicators_and_real_maize_evidence(self):
         task = self.store.create_task(
@@ -81,15 +92,80 @@ class TaskServiceTests(unittest.TestCase):
             (task["task_id"],),
         )
         self.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
 
         snapshot = self.store.create_snapshot(task["task_id"])
 
         self.assertTrue(snapshot["snapshot_id"])
 
+    def test_snapshot_requires_an_approved_formula_version_for_every_applicable_indicator(self):
+        """Break caught: reviewed input data could freeze despite unreviewed methods or parameters."""
+        self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.store.connection.commit()
+
+        with self.assertRaises(SnapshotBlocked) as raised:
+            self.store.create_snapshot(task["task_id"])
+
+        self.assertIn("formula_version:P1", raised.exception.blocking)
+        self.assertIn("formula_version:C3", raised.exception.blocking)
+
     def test_run_rejects_an_unknown_snapshot(self):
         """Break caught: a caller could launch a calculation without frozen reviewed inputs."""
         with self.assertRaises(KeyError):
             self.store.create_run("missing-snapshot", "request-1")
+
+    def test_formula_version_rejects_an_indicator_outside_the_22_card_catalog(self):
+        """Break caught: an arbitrary formula could be inserted without a GB/T method-card identity."""
+        with self.assertRaises(ValueError):
+            self.store.propose_formula_version(
+                "X99", "audited-2024-v1", "a" * 64, "source-a", "b" * 64, "analyst", "request-1"
+            )
+
+    def test_formula_version_is_persisted_pending_review_with_method_and_parameter_hashes(self):
+        """Break caught: a formula proposal could lose the method-card or parameter provenance needed for review."""
+        proposal = self.store.propose_formula_version(
+            "R6", "audited-2024-v1", "a" * 64, "carbon-method-note", "b" * 64, "analyst", "request-1"
+        )
+        stored = self.store.formula_version(proposal["formula_version_id"])
+
+        self.assertEqual(proposal["indicator_id"], "R6")
+        self.assertEqual(proposal["method_id"], "regulating.carbon_sequestration.v1")
+        self.assertEqual(proposal["parameter_manifest_sha256"], "a" * 64)
+        self.assertEqual(proposal["source_sha256"], "b" * 64)
+        self.assertEqual(proposal["status"], "pending_review")
+        self.assertEqual(stored, proposal)
+
+    def test_formula_version_review_approves_a_specific_pending_version_with_audit_record(self):
+        """Break caught: a reviewer could approve an unspecified formula version without an audit trail."""
+        proposal = self.store.propose_formula_version(
+            "R6", "audited-2024-v1", "a" * 64, "carbon-method-note", "b" * 64, "analyst", "request-1"
+        )
+
+        approved = self.store.review_formula_version(
+            proposal["formula_version_id"], 1, "approved", "method-reviewer", "GB/T reference and parameters checked"
+        )
+        history = self.store.formula_review_history(proposal["formula_version_id"])
+
+        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(approved["review_version"], 2)
+        self.assertEqual(history[0]["reviewer"], "method-reviewer")
+        self.assertEqual(history[0]["decision"], "approved")
+
+    def test_formula_version_proposal_is_idempotent(self):
+        """Break caught: a retry could create two competing pending formula versions."""
+        first = self.store.propose_formula_version(
+            "R6", "audited-2024-v1", "a" * 64, "carbon-method-note", "b" * 64, "analyst", "request-1"
+        )
+        retried = self.store.propose_formula_version(
+            "R6", "audited-2024-v1", "a" * 64, "carbon-method-note", "b" * 64, "analyst", "request-1"
+        )
+
+        self.assertEqual(first["formula_version_id"], retried["formula_version_id"])
 
     def test_not_applicable_indicator_does_not_require_its_valuation_inputs_in_snapshot(self):
         """Break caught: an approved inland non-applicability conclusion still demanded impossible coastal values."""
@@ -108,6 +184,7 @@ class TaskServiceTests(unittest.TestCase):
             (task["task_id"],),
         )
         self.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
 
         snapshot = self.store.create_snapshot(task["task_id"])
 
@@ -122,6 +199,7 @@ class TaskServiceTests(unittest.TestCase):
             (task["task_id"],),
         )
         self.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
         snapshot = self.store.create_snapshot(task["task_id"])
 
         first = self.store.create_run(snapshot["snapshot_id"], "run-request-1")
@@ -130,6 +208,7 @@ class TaskServiceTests(unittest.TestCase):
 
         self.assertEqual(first["run_id"], retried["run_id"])
         self.assertEqual(first["status"], "blocked")
+        self.assertEqual(first["reason"], "deterministic calculation engine is not yet configured for this snapshot")
         self.assertEqual(len(events), 1)
 
     def test_review_requires_current_node_version(self):

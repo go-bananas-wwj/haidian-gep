@@ -1,4 +1,4 @@
-"""Human-approved method-card registry for the 2024 Haidian GEP scope.
+"""Human-reviewable method-card registry for the 2024 Haidian GEP scope.
 
 Cards identify the cited GB/T appendix range and the input contract.  They do
 not supply prices, coefficients, or fabricated calculations: every card begins
