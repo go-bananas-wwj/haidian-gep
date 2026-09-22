@@ -17,6 +17,13 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_bytes(_json_bytes(value))
 
 
+def _write_jsonl(path: Path, values: list[dict[str, Any]]) -> None:
+    path.write_bytes(b"".join(
+        (json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
+        for value in values
+    ))
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -33,6 +40,24 @@ def export_incomplete_task_delivery(store: GepStore, task_id: str, destination: 
     graph = store.graph(task_id)
     appendix = store.appendix_e(task_id)
     events = store.events(task_id)
+    supplement_records = []
+    for node in graph["nodes"]:
+        evidence = node.get("evidence", {})
+        current = evidence.get("current", {}) if isinstance(evidence, dict) else {}
+        if current.get("result_type") == "agent_candidate":
+            supplement_records.append({
+                "task_id": task_id,
+                "node_id": node["node_id"],
+                "node_key": node["node_key"],
+                "node_version": node["version"],
+                "value": node["value"],
+                "unit": node["unit"],
+                "acquisition_status": node["acquisition_status"],
+                "review_status": node["review_status"],
+                "explanation": current.get("explanation"),
+                "evidence": current,
+            })
+    supplement_records.sort(key=lambda record: (record["node_key"], record["node_id"]))
     files = {
         "graph.json": graph,
         "appendix_e.json": appendix,
@@ -40,6 +65,7 @@ def export_incomplete_task_delivery(store: GepStore, task_id: str, destination: 
     }
     for name, content in files.items():
         _write_json(output / name, content)
+    _write_jsonl(output / "supplement_records.jsonl", supplement_records)
     (output / "README.md").write_text(
         "# Haidian GEP task evidence package\n\n"
         "Scope: incomplete evidence-first 2024 task delivery.\n\n"
@@ -47,13 +73,14 @@ def export_incomplete_task_delivery(store: GepStore, task_id: str, destination: 
         "indicators, evidence, methods, admissions, snapshot and run gates pass human review.\n",
         encoding="utf-8",
     )
-    artifact_files = ("README.md", "graph.json", "appendix_e.json", "events.json")
+    artifact_files = ("README.md", "graph.json", "appendix_e.json", "events.json", "supplement_records.jsonl")
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "incomplete_task_evidence",
         "task_id": task_id,
         "formal_gep_value": None,
         "appendix_e_row_count": appendix["row_count"],
+        "supplement_record_count": len(supplement_records),
         "artifact_sha256": {name: _sha256(output / name) for name in artifact_files},
     }
     _write_json(output / "manifest.json", manifest)

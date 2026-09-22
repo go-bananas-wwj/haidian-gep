@@ -47,6 +47,37 @@ class IncompleteTaskDeliveryTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_export_includes_agent_candidate_records_with_evidence_and_explanation(self):
+        """Break caught: a delivery could expose a candidate value but lose its source and tool provenance."""
+        class Workflow:
+            def run(self, _work_order):
+                return {
+                    "value": 2100, "unit": "yuan/t", "explanation": "从价格表定位并提取。",
+                    "evidence": {"source_id": "price-register-2024", "source_type": "official_register",
+                                 "locator": "table=maize;row=2024", "source_sha256": "a" * 64,
+                                 "license_or_access": "internal-review-required", "tool_run_id": "dify-run-001",
+                                 "extracted_fragment": "玉米，2100 元/吨"},
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = GepStore(Path(directory) / "tasks.sqlite3", supplement_workflow=Workflow())
+            try:
+                task = store.create_task("110108", 2024, "pending-confirmation", "GB/T 46869-2025", "reference-2024-v0.1")
+                node = store.node(task["task_id"], "P1.maize.producer_price")
+                store.request_supplement(task["task_id"], node["node_id"], "price-request-1")
+                output = Path(directory) / "delivery"
+
+                manifest = export_incomplete_task_delivery(store, task["task_id"], output)
+
+                records = [json.loads(line) for line in (output / "supplement_records.jsonl").read_text(encoding="utf-8").splitlines()]
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["value"], 2100)
+                self.assertEqual(records[0]["evidence"]["source_id"], "price-register-2024")
+                self.assertEqual(records[0]["evidence"]["tool_run_id"], "dify-run-001")
+                self.assertIn("supplement_records.jsonl", manifest["artifact_sha256"])
+            finally:
+                store.close()
+
     def test_cli_exports_a_new_truthful_delivery_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "tasks.sqlite3"
