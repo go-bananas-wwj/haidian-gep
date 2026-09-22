@@ -1,5 +1,6 @@
 import unittest
 
+from gep.methods import method_cards
 from gep.runs import evaluate_frozen_graph
 
 
@@ -41,6 +42,17 @@ class FrozenRunTests(unittest.TestCase):
         self.assertIsNone(run.formal_gep_value_yuan)
         self.assertIn("P1:missing_indicator", run.blocking_nodes)
         self.assertNotIn("R4:method_implementation_pending", run.blocking_nodes)
+
+    def test_formal_total_requires_an_approved_adjustment_ledger_even_when_subjects_are_resolved(self):
+        graph = {"nodes": [
+            {"node_key": card.indicator_id, "kind": "indicator", "category": "material", "applicability_status": "not_applicable"}
+            for card in method_cards()
+        ]}
+
+        run = evaluate_frozen_graph(graph)
+
+        self.assertIsNone(run.formal_gep_value_yuan)
+        self.assertIn("adjustment_ledger:missing_or_unapproved", run.blocking_nodes)
 
 
 if __name__ == "__main__":

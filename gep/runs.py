@@ -90,6 +90,9 @@ def evaluate_frozen_graph(graph: Mapping[str, Any]) -> RunEvaluation:
             category_totals[str(indicator.get("category"))] += float(result["value_yuan"])
         else:
             blocking.extend(f"{card.indicator_id}:{field}" for field in result["blocking_fields"])
+    adjustment_ledger = graph.get("adjustment_ledger")
+    if not isinstance(adjustment_ledger, Mapping) or adjustment_ledger.get("status") != "approved":
+        blocking.append("adjustment_ledger:missing_or_unapproved")
     return RunEvaluation(
         None if blocking else sum(category_totals.values()),
         items,
