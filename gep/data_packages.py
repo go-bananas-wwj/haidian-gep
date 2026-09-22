@@ -42,6 +42,7 @@ class DataPackageCatalog:
         manifest = self._json(package / "manifest.json")
         quality = self._json(package / "quality_report.json")
         missing = self._missing_inputs(package / "missing_inputs.csv")
+        alphaearth = self._alphaearth_candidates(self.root / "00_catalog" / "aef_2024_candidate_tiles.json")
         return {
             "data_version": data_version,
             "release_id": manifest.get("release_id"),
@@ -52,6 +53,7 @@ class DataPackageCatalog:
             "remaining": quality.get("remaining", []),
             "missing_input_count": len(missing),
             "missing_inputs": missing,
+            "alphaearth_candidates": alphaearth,
         }
 
     @staticmethod
@@ -73,3 +75,18 @@ class DataPackageCatalog:
                 return [{key: str(row.get(key, "")) for key in sorted(required)} for row in reader]
         except OSError:
             return []
+
+    @classmethod
+    def _alphaearth_candidates(cls, path: Path) -> dict[str, Any]:
+        document = cls._json(path)
+        tiles = document.get("tiles")
+        if not isinstance(tiles, list):
+            return {"candidate_tile_count": 0, "boundary_statuses": [], "selection_states": [], "coverage_validated": False}
+        statuses = sorted({str(tile.get("boundary_status", "")) for tile in tiles if isinstance(tile, dict)})
+        selections = sorted({str(tile.get("selection", "")) for tile in tiles if isinstance(tile, dict)})
+        return {
+            "candidate_tile_count": len(tiles),
+            "boundary_statuses": statuses,
+            "selection_states": selections,
+            "coverage_validated": False,
+        }

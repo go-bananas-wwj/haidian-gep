@@ -28,6 +28,14 @@ class ApiTests(unittest.TestCase):
             "item,name,status,required_next_step\nP1,农产品,pending,价格和成本\nR6,固碳,pending,NPP和价格\n",
             encoding="utf-8",
         )
+        catalog = self.data_root / "00_catalog"
+        catalog.mkdir()
+        (catalog / "aef_2024_candidate_tiles.json").write_text(json.dumps({
+            "tiles": [
+                {"year": 2024, "boundary_status": "unconfirmed_osm_demo_boundary", "selection": "bbox_candidates_not_coverage_validation"},
+                {"year": 2024, "boundary_status": "unconfirmed_osm_demo_boundary", "selection": "bbox_candidates_not_coverage_validation"},
+            ],
+        }), encoding="utf-8")
         seal(package, "reference-2024-v0.1")
         self.app = make_app(
             Path(self.directory.name) / "tasks.sqlite3", reviewer_header="HTTP_X_GEP_ACTOR", data_root=self.data_root,
@@ -86,6 +94,9 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(package["release_verification"]["valid"])
         self.assertEqual(package["missing_input_count"], 2)
         self.assertEqual(package["remaining"], ["confirmed 2024 boundary", "production costs and prices"])
+        self.assertEqual(package["alphaearth_candidates"]["candidate_tile_count"], 2)
+        self.assertEqual(package["alphaearth_candidates"]["boundary_statuses"], ["unconfirmed_osm_demo_boundary"])
+        self.assertFalse(package["alphaearth_candidates"]["coverage_validated"])
 
     def test_stale_review_returns_409_and_evidence_is_readable(self):
         _, task, _ = self.request("POST", "/tasks", {

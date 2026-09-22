@@ -42,6 +42,7 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("数据包准入", page)
         self.assertIn("/data-versions/", page)
         self.assertIn("accounting_ready", page)
+        self.assertIn("alphaearth_candidates", page)
 
     def test_canvas_keeps_layout_state_outside_the_accounting_graph(self):
         """Break caught: panning, zooming, collapsing, or moving a card could mutate audited inputs."""
