@@ -2,7 +2,9 @@ import os
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
@@ -29,3 +31,30 @@ class DeploymentScriptTests(unittest.TestCase):
                 value = connection.execute("SELECT value FROM evidence").fetchone()[0]
             self.assertEqual(value, "reviewed-maize")
             self.assertTrue((archive / "tasks.sqlite3.sha256").is_file())
+
+    def test_healthcheck_retries_transient_proxy_failures(self):
+        """Break caught: a Compose startup 502 could be reported as a permanent deployment failure."""
+        class Handler(BaseHTTPRequestHandler):
+            attempts = 0
+
+            def do_GET(self):
+                Handler.attempts += 1
+                self.send_response(502 if Handler.attempts < 3 else 200)
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            env = {**os.environ, "GEP_HEALTH_URL": f"http://127.0.0.1:{server.server_port}/health", "GEP_HEALTH_ATTEMPTS": "3", "GEP_HEALTH_DELAY_SECONDS": "0"}
+            completed = subprocess.run([str(Path(__file__).parents[1] / "deploy" / "healthcheck.sh")], env=env, text=True, capture_output=True, check=True)
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
+        self.assertEqual(Handler.attempts, 3)
+        self.assertIn("healthy", completed.stdout)
