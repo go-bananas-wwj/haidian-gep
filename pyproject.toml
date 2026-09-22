@@ -17,3 +17,6 @@ haidian-gep = "gep.__main__:main"
 
 [tool.setuptools]
 packages = ["gep"]
+
+[tool.setuptools.package-data]
+gep = ["web/*.html"]
