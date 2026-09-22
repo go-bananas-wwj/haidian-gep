@@ -54,6 +54,15 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn("中间投入成本", graph)
         self.assertIn("玉米产量", graph)
 
+    def test_canvas_matches_the_overleaf_accounting_board_hierarchy(self):
+        graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
+        self.assertIn("物质产品 + 调节服务 + 文化服务", graph)
+        self.assertIn("7 个科目", graph)
+        self.assertIn("12 个科目", graph)
+        self.assertIn("3 个科目", graph)
+        self.assertIn("粮食作物", graph)
+        self.assertIn("小麦（候选）", graph)
+
 
 if __name__ == "__main__":
     unittest.main()

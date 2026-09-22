@@ -1,5 +1,5 @@
 const CATEGORIES = [
-  ["material", "物质产品"], ["regulating", "调节服务"], ["cultural", "文化服务"],
+  ["material", "物质产品", "7 个科目"], ["regulating", "调节服务", "12 个科目"], ["cultural", "文化服务", "3 个科目"],
 ];
 
 // The graph is fixed by GB/T 46869-2025.  Server nodes supply current state,
@@ -54,13 +54,17 @@ export class GepGraph {
   render(nodes = this.nodes) {
     this.nodes = nodes; const byKey = new Map(nodes.map(node => [node.node_key, node]));
     const scale = document.createElement("div"); scale.className = "graph-scale"; scale.style.transform = `scale(${this.zoom})`;
-    const root = document.createElement("div"); root.className = "graph-root"; root.innerHTML = '<span class="root-node">海淀区 2024 年度 GEP</span>'; scale.append(root);
+    const root = document.createElement("div"); root.className = "graph-root";
+    root.innerHTML = '<span class="root-node"><strong>GEP 年度核算</strong><small>物质产品 + 调节服务 + 文化服务</small></span>'; scale.append(root);
     const grid = document.createElement("div"); grid.className = "category-grid";
-    for (const [category, title] of CATEGORIES) {
+    for (const [category, title, count] of CATEGORIES) {
       const card = document.createElement("section"); card.className = "category";
       const head = document.createElement("div"); head.className = "category-head";
       const fold = document.createElement("button"); fold.textContent = this.collapsed[category] ? "展开" : "折叠"; fold.onclick = () => { this.collapsed[category] = !this.collapsed[category]; this.saveView(); this.render(); };
-      head.append(Object.assign(document.createElement("span"), { textContent: title }), fold); card.append(head);
+      const titleNode = document.createElement("span"); titleNode.textContent = title;
+      const countNode = document.createElement("small"); countNode.textContent = count;
+      const controls = document.createElement("span"); controls.className = "category-controls"; controls.append(countNode, fold);
+      head.append(titleNode, controls); card.append(head);
       if (!this.collapsed[category]) {
         const stack = document.createElement("div"); stack.className = "indicator-stack";
         for (const [key, label, group] of INDICATORS.filter(row => row[2] === category)) {
@@ -84,19 +88,39 @@ export class GepGraph {
       if (element) { element.classList.remove("node-flow"); requestAnimationFrame(() => element.classList.add("node-flow")); }
     }
   }
-  // 产品详情以鱼骨图呈现：产品为主干，核算要素和可点击来源节点为分支。
+  // 产品详情以可折叠的鱼骨式树呈现：对象目录 → 具体产品 → 可审核字段。
   renderFishbone(indicator, nodes, onNode) {
     const inputs = nodes.filter(node => node.parent_key === indicator.node_key);
-    const row = document.createElement("div"); row.className = "fishbone-row";
-    const productLabels = { P1:"农产品 · 玉米（已识别产品）", P2:"林产品 · 待建立经营产品目录", P3:"牧产品 · 待建立辖区产品目录", P4:"渔产品 · 待建立水体与产品目录" };
-    const product = document.createElement("div"); product.className = "fish-product"; product.textContent = productLabels[indicator.node_key] || `${indicator.node_key} · ${indicator.label}`; row.append(product);
-    const branches = document.createElement("div"); branches.className = "fish-branches";
-    if (!inputs.length) { branches.innerHTML = '<div class="fish-empty">尚未建立该指标的核算要素。保留为待补充，不能视为零值。</div>'; }
-    for (const input of inputs) {
-      const [state, style] = nodeState(input); const node = document.createElement("button"); node.className = "fish-node";
-      node.innerHTML = `<strong>${readableField(input)}</strong><small>${input.value === null ? "等待可审核数据" : `${input.value} ${input.unit || ""}`}</small><span class="node-state ${style}">${state}</span>`;
-      node.onclick = () => onNode(input); branches.append(node);
+    const tree = document.createElement("div"); tree.className = "product-tree";
+    const catalog = document.createElement("div"); catalog.className = "product-catalog";
+    catalog.innerHTML = indicator.node_key === "P1" ? '<strong>粮食作物</strong><span>目录由统计表生成</span>' : `<strong>${indicator.label}对象目录</strong><span>待智能体补充并审核</span>`;
+    tree.append(catalog);
+    const appendProduct = (name, hint, fields) => {
+      const product = document.createElement("section"); product.className = "product-branch";
+      product.innerHTML = `<header><strong>${name}</strong><span>${hint}</span></header>`;
+      const rows = document.createElement("div"); rows.className = "product-fields";
+      for (const [label, candidates] of fields) {
+        const input = candidates.find(Boolean);
+        const row = document.createElement(input ? "button" : "div"); row.className = "product-field";
+        if (!input) { row.innerHTML = `<strong>${label}</strong><span class="node-state">待智能体补充</span>`; }
+        else { const [status, style] = nodeState(input); row.innerHTML = `<strong>${label}</strong><span>${input.value === null ? "" : `${input.value} ${input.unit || ""}`}</span><span class="node-state ${style}">${status}</span>`; row.onclick = () => onNode(input); }
+        rows.append(row);
+      }
+      product.append(rows); tree.append(product);
+    };
+    if (indicator.node_key === "P1") {
+      const field = key => inputs.find(item => item.node_key.endsWith(`.${key}`));
+      appendProduct("玉米", "已从年鉴记录识别", [
+        ["产量", [field("quantity")]], ["生产者价格", [field("producer_price")]],
+        ["投入与成本", [field("intermediate_cost"), field("labor"), field("depreciation"), field("tax_net"), field("capital_return")]],
+      ]);
+      appendProduct("小麦（候选）", "候选目录，尚未形成 2024 年可审核记录", [["产量", []], ["生产者价格", []], ["投入与成本", []]]);
+      appendProduct("其他粮食（候选）", "候选目录，尚未形成 2024 年可审核记录", [["产量", []], ["生产者价格", []], ["投入与成本", []]]);
+    } else if (inputs.length) {
+      appendProduct(`${indicator.label} · 待确认对象`, "先确认对象目录与本地归属", inputs.map(input => [readableField(input), [input]]));
+    } else {
+      tree.innerHTML += '<div class="fish-empty">尚未建立可审核对象目录；此科目保持为待补充，不能按零值计算。</div>';
     }
-    row.append(branches); return row;
+    return tree;
   }
 }
