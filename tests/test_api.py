@@ -13,17 +13,17 @@ class ApiTests(unittest.TestCase):
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
-        self.app = make_app(Path(self.directory.name) / "tasks.sqlite3")
+        self.app = make_app(Path(self.directory.name) / "tasks.sqlite3", reviewer_header="HTTP_X_GEP_ACTOR")
 
     def tearDown(self):
         self.app.close()
         self.directory.cleanup()
 
-    def request(self, method, path, body=None):
+    def request(self, method, path, body=None, actor="trusted-reviewer"):
         encoded = json.dumps(body).encode() if body is not None else b""
         environ = {}
         setup_testing_defaults(environ)
-        environ.update({"REQUEST_METHOD": method, "PATH_INFO": path, "CONTENT_LENGTH": str(len(encoded)), "wsgi.input": io.BytesIO(encoded)})
+        environ.update({"REQUEST_METHOD": method, "PATH_INFO": path, "CONTENT_LENGTH": str(len(encoded)), "wsgi.input": io.BytesIO(encoded), "HTTP_X_GEP_ACTOR": actor})
         status, headers = [], []
         payload = b"".join(self.app(environ, lambda s, h: (status.append(s), headers.extend(h))))
         header_map = dict(headers)
@@ -64,6 +64,39 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(first, 200)
         self.assertEqual(stale, 409)
         self.assertIn("stale", response["error"])
+
+    def test_proxy_authenticated_actor_overrides_client_supplied_reviewer(self):
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+        _, graph, _ = self.request("GET", f"/tasks/{task['task_id']}/graph")
+        maize = next(n for n in graph["nodes"] if n["node_key"] == "P1.maize.quantity")
+        status, _, _ = self.request("POST", f"/nodes/{maize['node_id']}/reviews", {
+            "expected_version": 1, "decision": "approved", "reviewer": "forged-client-name", "note": "verified",
+        }, actor="verified-proxy-user")
+        _, events, _ = self.request("GET", f"/tasks/{task['task_id']}/events")
+
+        event = next(item for item in events["events"] if item["type"] == "node.approved")
+        self.assertEqual(status, 200)
+        self.assertEqual(event["payload"]["reviewer"], "verified-proxy-user")
+
+    def test_proxy_authenticated_actor_overrides_client_supplied_revision_operator(self):
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+        _, graph, _ = self.request("GET", f"/tasks/{task['task_id']}/graph")
+        maize = next(n for n in graph["nodes"] if n["node_key"] == "P1.maize.quantity")
+        status, _, _ = self.request("POST", f"/nodes/{maize['node_id']}/revisions", {
+            "expected_version": 1, "value": 2936.0, "unit": "t/a", "operator": "forged-client-name",
+            "reason": "corrected", "evidence": {"source_id": "ledger", "source_type": "manual_correction", "locator": "row 8"},
+        }, actor="verified-proxy-user")
+        _, events, _ = self.request("GET", f"/tasks/{task['task_id']}/events")
+
+        event = next(item for item in events["events"] if item["type"] == "node.revised")
+        self.assertEqual(status, 200)
+        self.assertEqual(event["payload"]["operator"], "verified-proxy-user")
 
     def test_supplement_is_idempotent_and_reports_unconfigured_dify_as_blocked(self):
         _, task, _ = self.request("POST", "/tasks", {

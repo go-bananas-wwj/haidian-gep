@@ -6,6 +6,8 @@ task graph and enforces that only reviewed, complete inputs may be frozen.
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -48,6 +50,7 @@ class GepStore:
         self.connection = sqlite3.connect(str(database_path))
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA busy_timeout=5000")
         self.connection.execute("PRAGMA foreign_keys=ON")
         self._create_schema()
 
@@ -183,7 +186,12 @@ class GepStore:
             raise ConflictError("node version is stale or not awaiting review")
         status = "approved" if decision == "approved" else "returned"
         with self.connection:
-            self.connection.execute("UPDATE nodes SET review_status=? WHERE node_id=?", (status, node_id))
+            updated = self.connection.execute(
+                "UPDATE nodes SET review_status=? WHERE node_id=? AND version=? AND review_status='pending_review'",
+                (status, node_id, expected_version),
+            )
+            if updated.rowcount != 1:
+                raise ConflictError("node version is stale or not awaiting review")
             self.connection.execute(
                 "INSERT INTO reviews VALUES (?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, node_id, expected_version, decision, reviewer, note, _utc_now()),
@@ -193,22 +201,44 @@ class GepStore:
 
     def revise_node(
         self, node_id: str, expected_version: int, value: Any, unit: str, operator: str, reason: str,
+        evidence: dict[str, Any],
     ) -> dict[str, Any]:
+        if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
+            raise ValueError("corrected value must be a finite numeric measurement")
         if not unit.strip() or not operator.strip() or not reason.strip():
             raise ValueError("unit, operator, and reason are required")
+        if not isinstance(evidence, dict) or not all(str(evidence.get(key, "")).strip() for key in ("source_id", "source_type", "locator")):
+            raise ValueError("correction evidence needs source_id, source_type, and locator")
         row = self._node_by_id(node_id)
         if row["version"] != expected_version:
             raise ConflictError("node version is stale")
         next_version = expected_version + 1
+        previous_value = json.loads(row["value_json"]) if row["value_json"] is not None else None
+        previous_evidence = json.loads(row["evidence_json"])
+        original = previous_evidence.get("original", previous_evidence)
+        corrections = list(previous_evidence.get("corrections", []))
+        correction = {**evidence, "operator": operator, "reason": reason, "version": next_version, "created_utc": _utc_now()}
+        corrections.append(correction)
+        combined_evidence = {"original": original, "current": evidence, "corrections": corrections}
+        evidence_json = json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True)
         with self.connection:
-            self.connection.execute(
-                "UPDATE nodes SET value_json=?,unit=?,review_status='pending_review',version=? WHERE node_id=?",
-                (json.dumps(value, ensure_ascii=False), unit, next_version, node_id),
+            updated = self.connection.execute(
+                "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,review_status='pending_review',version=? WHERE node_id=? AND version=?",
+                (json.dumps(value, ensure_ascii=False, allow_nan=False), unit, evidence_json, next_version, node_id, expected_version),
             )
-            self._event(row["task_id"], node_id, "node.revised", {"version": next_version, "operator": operator, "reason": reason})
+            if updated.rowcount != 1:
+                raise ConflictError("node version is stale")
+            self._event(row["task_id"], node_id, "node.revised", {
+                "version": next_version, "operator": operator, "reason": reason,
+                "previous_value": previous_value, "value": value, "unit": unit,
+                "previous_evidence_sha256": hashlib.sha256(row["evidence_json"].encode()).hexdigest(),
+                "evidence_sha256": hashlib.sha256(evidence_json.encode()).hexdigest(),
+            })
         return self.node(row["task_id"], row["node_key"])
 
     def events(self, task_id: str, after: int = 0) -> list[dict[str, Any]]:
+        if self.connection.execute("SELECT 1 FROM tasks WHERE task_id=?", (task_id,)).fetchone() is None:
+            raise KeyError("task not found")
         rows = self.connection.execute(
             "SELECT * FROM events WHERE task_id=? AND sequence>? ORDER BY sequence", (task_id, after)
         ).fetchall()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
@@ -10,8 +11,9 @@ from .task_service import ConflictError, GepStore, SnapshotBlocked
 
 
 class DemoApi:
-    def __init__(self, database_path: str | Path):
+    def __init__(self, database_path: str | Path, reviewer_header: str | None = None):
         self.store = GepStore(database_path)
+        self.reviewer_header = reviewer_header or os.environ.get("GEP_TRUSTED_PROXY_USER_HEADER")
 
     def close(self) -> None:
         self.store.close()
@@ -30,7 +32,7 @@ class DemoApi:
     @staticmethod
     def _response(start_response: Callable, status: int, payload: dict[str, Any]):
         data = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
-        start_response(f"{status} { {200:'OK', 201:'Created', 202:'Accepted', 400:'Bad Request', 404:'Not Found', 409:'Conflict', 422:'Unprocessable Entity', 500:'Internal Server Error'}[status] }", [
+        start_response(f"{status} { {200:'OK', 201:'Created', 202:'Accepted', 400:'Bad Request', 404:'Not Found', 409:'Conflict', 422:'Unprocessable Entity', 500:'Internal Server Error', 503:'Service Unavailable'}[status] }", [
             ("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(data))),
         ])
         return [data]
@@ -69,9 +71,17 @@ class DemoApi:
                     return self._response(start_response, 200, self.store.evidence(node_id))
                 body = self._json_body(environ)
                 if method == "POST" and parts[2:] == ["reviews"]:
-                    return self._response(start_response, 200, self.store.review_node(node_id, **body))
+                    reviewer = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                    if not reviewer:
+                        return self._response(start_response, 503, {"error": "trusted reviewer identity is not configured"})
+                    body.pop("reviewer", None)
+                    return self._response(start_response, 200, self.store.review_node(node_id, reviewer=reviewer, **body))
                 if method == "POST" and parts[2:] == ["revisions"]:
-                    return self._response(start_response, 200, self.store.revise_node(node_id, **body))
+                    operator = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                    if not operator:
+                        return self._response(start_response, 503, {"error": "trusted operator identity is not configured"})
+                    body.pop("operator", None)
+                    return self._response(start_response, 200, self.store.revise_node(node_id, operator=operator, **body))
             return self._response(start_response, 404, {"error": "route not found"})
         except SnapshotBlocked as error:
             return self._response(start_response, 422, {"error": str(error), "blocking_nodes": error.blocking})
@@ -83,5 +93,5 @@ class DemoApi:
             return self._response(start_response, 400, {"error": str(error)})
 
 
-def make_app(database_path: str | Path) -> DemoApi:
-    return DemoApi(database_path)
+def make_app(database_path: str | Path, reviewer_header: str | None = None) -> DemoApi:
+    return DemoApi(database_path, reviewer_header=reviewer_header)

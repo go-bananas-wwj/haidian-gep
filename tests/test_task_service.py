@@ -64,12 +64,42 @@ class TaskServiceTests(unittest.TestCase):
 
         corrected = self.store.revise_node(
             maize["node_id"], maize["version"], 2936.0, "t/a", "operator", "corrected ledger",
+            {"source_id": "corrected-ledger", "source_type": "manual_correction", "locator": "ledger row 8"},
         )
         events = self.store.events(task["task_id"], after=0)
 
         self.assertEqual(corrected["review_status"], "pending_review")
         self.assertEqual(corrected["version"], 2)
         self.assertTrue(any(event["type"] == "node.revised" for event in events))
+
+    def test_revision_requires_new_evidence_and_preserves_observed_source(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        maize = self.store.node(task["task_id"], "P1.maize.quantity")
+
+        with self.assertRaises(ValueError):
+            self.store.revise_node(maize["node_id"], 1, 2936.0, "t/a", "operator", "correction", {})
+        corrected = self.store.revise_node(
+            maize["node_id"], 1, 2936.0, "t/a", "operator", "correction",
+            {"source_id": "corrected-ledger", "source_type": "manual_correction", "locator": "ledger row 8"},
+        )
+
+        self.assertEqual(corrected["evidence"]["original"]["table_id"], "5-11")
+        self.assertEqual(corrected["evidence"]["current"]["source_id"], "corrected-ledger")
+        event = next(event for event in self.store.events(task["task_id"]) if event["type"] == "node.revised")
+        self.assertEqual(event["payload"]["previous_value"], 2935.1)
+        self.assertEqual(event["payload"]["value"], 2936.0)
+
+    def test_second_database_connection_cannot_overwrite_same_node_version(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        maize = self.store.node(task["task_id"], "P1.maize.quantity")
+        other = GepStore(Path(self.directory.name) / "tasks.sqlite3")
+        evidence = {"source_id": "ledger", "source_type": "manual_correction", "locator": "row 8"}
+        try:
+            self.store.revise_node(maize["node_id"], 1, 2936.0, "t/a", "first", "first correction", evidence)
+            with self.assertRaises(ConflictError):
+                other.revise_node(maize["node_id"], 1, 2937.0, "t/a", "second", "second correction", evidence)
+        finally:
+            other.close()
 
 
 if __name__ == "__main__":
