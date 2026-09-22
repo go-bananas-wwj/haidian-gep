@@ -3,7 +3,7 @@
 ## 已部署范围
 
 - 宿主机部署根：`/data/wwj/haidian-gep`。
-- 应用提交：`96100be`（API 数据包目录）、`6cd5e7a`（画布准入展示）、`1718a71`（本地视图布局）及 `664b094`（按科目展开输入），分支 `feature/haidian-gep-demo-core`。
+- 应用提交：`96100be`（API 数据包目录）、`6cd5e7a`（画布准入展示）、`1718a71`（本地视图布局）、`664b094`（按科目展开输入）及 `0961252`（事件面板），分支 `feature/haidian-gep-demo-core`。
 - 服务：`task-api`（仅 Compose 内网）与 `task-web`（`127.0.0.1:9088`）。
 - API 容器镜像 ID：`sha256:a9f9b3515d749343037ffd981f2fb22b582f9d249c235c4038d7e5dcbaf49696`。
 - 持久化卷：`runtime/` 挂载为读写；准入数据目录 `data/` 挂载到 API 的 `/var/lib/haidian-gep-data`，并由 Docker 检查为 `RW=false`。
@@ -22,6 +22,7 @@
 9. 宿主机只读数据卷中的 `reference-2024-v0.1` 发布包可经 `/api/data-versions/reference-2024-v0.1` 读取：清单验证有效，但 `accounting_ready=false`、`full_gep_computed=false`，并返回 22 项缺口。画布在创建任务前展示该准入状态；没有把参考包登记为已准入输入。
 10. 画布提供缩放、三类折叠/展开和节点拖拽；布局按任务 ID 存入浏览器本地 `haidian-gep:view-layout:*`，不发送业务写请求、不改变 SQLite 节点、审核、快照或运行记录。
 11. 点击任一标准科目会从该任务图中读取同一 `parent_key` 下的必需输入并显示数值、单位、获取状态及审核状态；P1 同时保留玉米年鉴来源节点。其他科目不复用农产品字段或教学值。
+12. 画布以 `/tasks/{id}/events?after=<sequence>` 轮询服务端递增事件并显示实际序号、类型、时间与载荷；没有新增事件时不改变图或伪造运行进度。
 
 ## 运行和访问
 
