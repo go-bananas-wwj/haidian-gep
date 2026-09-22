@@ -18,7 +18,15 @@ INDICATOR_IDS = tuple(
     + [f"C{number}" for number in range(1, 4)]
 )
 APPLICABILITY_STATUSES = {"applicable", "not_applicable", "verified_zero"}
-ALLOWED_UNITS = {"t/a", "m3/a", "元/a", "万元/a", "人次/a", "hm2", "m2", "kWh/a"}
+ALLOWED_UNITS = {
+    "t/a", "m3/a", "元/a", "万元/a", "人次/a", "hm2", "m2", "kWh/a",
+    "person-visits/a", "person-hours/a", "room-nights/a", "h/visit", "元/h",
+    "元/visit", "元/room-night", "元/(m2*a)", "fraction", "metadata", "choice",
+}
+STRUCTURED_FIELD_UNITS = {
+    "origin": "metadata",
+    "deduplication_choice": "choice",
+}
 CORE_FIELDS = {
     "P1": "quantity|producer_price|intermediate_cost|labor|depreciation|tax_net|capital_return",
     "P2": "harvest_quantity|producer_price|intermediate_cost|labor|depreciation|tax_net|capital_return",
@@ -39,9 +47,9 @@ CORE_FIELDS = {
     "R10": "temperature_humidity|transpiration|service_days|energy_efficiency|electricity_price",
     "R11": "near_far_noise|road_greenbelt_geometry|service_days|barrier_cost",
     "R12": "crop_quantity|pollination_dependence|crop_price|deduplication_choice",
-    "C1": "visitor_count|origin|travel_time|travel_cost|attribution",
+    "C1": "visitor_count|origin|travel_time|hourly_wage|travel_cost|attribution",
     "C2": "visitor_count|stay_duration|hourly_wage|deduplication_choice",
-    "C3": "hotel_room_nights|housing_service_area|service_price|landscape_premium",
+    "C3": "hotel_room_nights|hotel_room_price|hotel_landscape_premium|housing_service_area|housing_service_price|housing_landscape_premium",
 }
 
 
@@ -108,10 +116,17 @@ def admit(
             blockers.append(_block(node_id, "outside_scope", "input must be for Haidian 110108 in 2024"))
             continue
         value = record.get("value")
+        unit = record.get("unit")
+        field = node_id.rsplit(".", 1)[-1]
         if _is_blank(value):
             blockers.append(_block(node_id, "missing_value", "required input has no value"))
             continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        expected_structured_unit = STRUCTURED_FIELD_UNITS.get(field)
+        if expected_structured_unit is not None:
+            if unit != expected_structured_unit or not isinstance(value, str) or not value.strip():
+                blockers.append(_block(node_id, "invalid_structured_value", "structured field needs its declared non-empty text value"))
+                continue
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             blockers.append(_block(node_id, "non_finite_value", "input value must be a finite numeric measurement"))
             continue
         if record.get("status") != "approved":
@@ -119,7 +134,7 @@ def admit(
             continue
         if not str(record.get("source_id", "")).strip():
             blockers.append(_block(node_id, "missing_source", "input needs a stable source ID"))
-        if record.get("unit") not in ALLOWED_UNITS:
+        if unit not in ALLOWED_UNITS:
             blockers.append(_block(node_id, "unsupported_unit", "input unit is not permitted by annual rules"))
         source_hash = str(record.get("sha256", ""))
         if len(source_hash) != 64 or any(character not in "0123456789abcdef" for character in source_hash.lower()):

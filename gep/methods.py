@@ -98,7 +98,7 @@ _CARDS = (
                "Use crop-specific 2024 quantity, dependency, phenology, and local applicability evidence.",
                "P1 and R12 use an explicit one-time inclusion choice."),
     MethodCard("C1", "A.72--A.75", "cultural.travel_cost.v1",
-               ("visitor_count", "origin", "travel_time", "travel_cost", "attribution"),
+               ("visitor_count", "origin", "travel_time", "hourly_wage", "travel_cost", "attribution"),
                "Natural-site visitor records, purpose attribution, and stratified 2024 travel inputs are required.",
                "Do not substitute total tourism revenue; overlap with C2 activity time is removed."),
     MethodCard("C2", "A.76--A.77", "cultural.recreation_time.v1",
@@ -106,7 +106,7 @@ _CARDS = (
                "Park/greenway user-hours need 2024 counts, duration sampling, and local hourly wage denominator.",
                "C1's same visitor activity time is not double counted."),
     MethodCard("C3", "A.78--A.82", "cultural.landscape_premium.v1",
-               ("hotel_room_nights", "housing_service_area", "service_price", "landscape_premium"),
+               ("hotel_room_nights", "hotel_room_price", "hotel_landscape_premium", "housing_service_area", "housing_service_price", "housing_landscape_premium"),
                "Use annual service use and evidenced landscape premium, not property asset sale value.",
                "Deduct overlap between accommodation/housing premium and travel expenditure."),
 )

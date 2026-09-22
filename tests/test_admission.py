@@ -89,6 +89,39 @@ class AdmissionTests(unittest.TestCase):
              ("P1.maize.price", "missing_required_field")],
         )
 
+    def test_admission_accepts_the_typed_cultural_service_inputs_required_by_method_cards(self):
+        """Break caught: valid 2024 cultural inputs could be rejected before a formula sees them."""
+        cultural = [
+            record("C1.visitor_count", indicator_id="C1", value=1000, unit="person-visits/a", product_id=""),
+            record("C1.origin", indicator_id="C1", value="stratified_2024_survey", unit="metadata", product_id=""),
+            record("C1.travel_time", indicator_id="C1", value=4, unit="h/visit", product_id=""),
+            record("C1.hourly_wage", indicator_id="C1", value=100, unit="元/h", product_id=""),
+            record("C1.travel_cost", indicator_id="C1", value=300, unit="元/visit", product_id=""),
+            record("C1.attribution", indicator_id="C1", value=0.5, unit="fraction", product_id=""),
+            record("C2.visitor_count", indicator_id="C2", value=1000, unit="person-visits/a", product_id=""),
+            record("C2.stay_duration", indicator_id="C2", value=2, unit="h/visit", product_id=""),
+            record("C2.hourly_wage", indicator_id="C2", value=50, unit="元/h", product_id=""),
+            record("C2.deduplication_choice", indicator_id="C2", value="exclusive_to_c2", unit="choice", product_id=""),
+            record("C3.hotel_room_nights", indicator_id="C3", value=100, unit="room-nights/a", product_id=""),
+            record("C3.hotel_room_price", indicator_id="C3", value=500, unit="元/room-night", product_id=""),
+            record("C3.hotel_landscape_premium", indicator_id="C3", value=0.1, unit="fraction", product_id=""),
+            record("C3.housing_service_area", indicator_id="C3", value=1000, unit="m2", product_id=""),
+            record("C3.housing_service_price", indicator_id="C3", value=20, unit="元/(m2*a)", product_id=""),
+            record("C3.housing_landscape_premium", indicator_id="C3", value=0.05, unit="fraction", product_id=""),
+        ]
+        states = {indicator: "not_applicable" for indicator in ALL_INDICATORS}
+        states.update({"C1": "applicable", "C2": "applicable", "C3": "applicable"})
+        required = {
+            "C1": tuple(row["node_id"] for row in cultural if row["indicator_id"] == "C1"),
+            "C2": tuple(row["node_id"] for row in cultural if row["indicator_id"] == "C2"),
+            "C3": tuple(row["node_id"] for row in cultural if row["indicator_id"] == "C3"),
+        }
+
+        result = admit(cultural, states, required, [])
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(result.blockers, ())
+
     def test_reference_catalog_imports_observations_as_unreviewed_without_rewriting_source(self):
         fields = "region_code,year,table_id,printed_page,pdf_page,source_file,metric,value,unit,status,notes\n"
         rows = (
