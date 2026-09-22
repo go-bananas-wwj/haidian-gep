@@ -131,6 +131,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("请求智能体补充", page["html"])
 
+    def test_root_renders_parent_run_lineage_in_result_review(self):
+        """Break caught: a revised run could hide its immutable predecessor from the result-review page."""
+        status, page, _ = self.request("GET", "/")
+
+        self.assertEqual(status, 200)
+        self.assertIn("parent_run_id", page["html"])
+
     def test_task_center_lists_persisted_task_state_and_latest_run(self):
         """Break caught: a refresh could leave users unable to find a persisted task or its blockers."""
         _, first, _ = self.request("POST", "/tasks", {
