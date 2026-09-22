@@ -1,6 +1,6 @@
 import unittest
 
-from gep.formulas.regulating import calculate_carbon_from_npp, calculate_oxygen_from_carbon
+from gep.formulas.regulating import calculate_carbon_from_npp, calculate_oxygen_from_carbon, calculate_water_balance
 from gep.formulas.registry import calculate_indicator
 
 
@@ -74,6 +74,46 @@ class RegulatingFormulaTests(unittest.TestCase):
 
         self.assertTrue(result.calculated)
         self.assertAlmostEqual(result.value_yuan, 76.77866666666667)
+
+    def test_r1_water_balance_uses_precipitation_minus_surface_runoff_minus_actual_et(self):
+        result = calculate_water_balance({
+            "precipitation": {"value": 1000, "unit": "mm/a"},
+            "surface_runoff": {"value": 200, "unit": "mm/a"},
+            "actual_et": {"value": 300, "unit": "mm/a"},
+            "ecosystem_area": {"value": 10_000, "unit": "m2"},
+            "valuation_parameter": {"value": 1, "unit": "元/m3"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.physical_value, 5000)
+        self.assertEqual(result.physical_unit, "m3/a")
+        self.assertEqual(result.value_yuan, 5000)
+        self.assertEqual(result.standard_clause, "A.4--A.6")
+
+    def test_r1_preserves_a_negative_water_balance_for_review(self):
+        result = calculate_water_balance({
+            "precipitation": {"value": 100, "unit": "mm/a"},
+            "surface_runoff": {"value": 200, "unit": "mm/a"},
+            "actual_et": {"value": 300, "unit": "mm/a"},
+            "ecosystem_area": {"value": 10_000, "unit": "m2"},
+            "valuation_parameter": {"value": 1, "unit": "元/m3"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.physical_value, -4000)
+        self.assertEqual(result.review_status, "requires_human_review")
+
+    def test_registry_dispatches_r1_to_the_annual_water_balance_path(self):
+        result = calculate_indicator("R1", {
+            "precipitation": {"value": 1000, "unit": "mm/a"},
+            "surface_runoff": {"value": 200, "unit": "mm/a"},
+            "actual_et": {"value": 300, "unit": "mm/a"},
+            "ecosystem_area": {"value": 10_000, "unit": "m2"},
+            "valuation_parameter": {"value": 1, "unit": "元/m3"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.value_yuan, 5000)
 
 
 if __name__ == "__main__":

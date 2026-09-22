@@ -65,3 +65,30 @@ def calculate_oxygen_from_carbon(inputs: Mapping[str, Any]) -> MaterialResult:
         True, oxygen_tonnes, "tO2/a", None, value_yuan, value_yuan / 10_000,
         "A.55--A.56", "calculated", (),
     )
+
+
+def calculate_water_balance(inputs: Mapping[str, Any]) -> MaterialResult:
+    """Calculate R1 annual water conservation from P - surface runoff - actual ET."""
+    precipitation = _measurement(inputs, "precipitation", "mm/a")
+    runoff = _measurement(inputs, "surface_runoff", "mm/a")
+    actual_et = _measurement(inputs, "actual_et", "mm/a")
+    area = _measurement(inputs, "ecosystem_area", "m2")
+    value_rate = _measurement(inputs, "valuation_parameter", "元/m3")
+    values = {
+        "precipitation": precipitation,
+        "surface_runoff": runoff,
+        "actual_et": actual_et,
+        "ecosystem_area": area,
+        "valuation_parameter": value_rate,
+    }
+    invalid = [field for field, value in values.items() if value is None or value < 0]
+    if area is not None and area <= 0 and "ecosystem_area" not in invalid:
+        invalid.append("ecosystem_area")
+    if invalid:
+        return MaterialResult(False, None, None, None, None, None, "A.4--A.6", "blocked", tuple(sorted(invalid)))
+    volume_m3 = (precipitation - runoff - actual_et) * area * 1e-3
+    value_yuan = volume_m3 * value_rate
+    return MaterialResult(
+        True, volume_m3, "m3/a", None, value_yuan, value_yuan / 10_000,
+        "A.4--A.6", "requires_human_review" if volume_m3 < 0 else "calculated", (),
+    )
