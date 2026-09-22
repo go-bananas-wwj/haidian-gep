@@ -21,6 +21,15 @@ class DeploymentConfigTests(unittest.TestCase):
             api_section,
         )
 
+    def test_web_waits_for_api_health_before_first_start(self):
+        compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
+        api_section, web_section = compose.split("  task-web:", 1)
+
+        self.assertIn("healthcheck:", api_section)
+        self.assertIn('"CMD", "python", "-c"', api_section)
+        self.assertIn("depends_on:", web_section)
+        self.assertIn("condition: service_healthy", web_section)
+
     def test_canvas_uses_nginx_api_route_on_the_9088_web_entrypoint(self):
         page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
 
