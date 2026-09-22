@@ -35,6 +35,14 @@ class DeploymentConfigTests(unittest.TestCase):
 
         self.assertIn("const apiBase='/api';", page)
 
+    def test_canvas_reads_the_selected_data_package_before_creating_a_task(self):
+        """Break caught: a browser could hide that its selected data package is reference-only."""
+        page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("数据包准入", page)
+        self.assertIn("/data-versions/", page)
+        self.assertIn("accounting_ready", page)
+
 
 if __name__ == "__main__":
     unittest.main()
