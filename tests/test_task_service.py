@@ -27,6 +27,9 @@ class TaskServiceTests(unittest.TestCase):
                 proposal["formula_version_id"], 1, "approved", "method-reviewer", "verified",
             )
 
+    def register_test_boundary(self, boundary_version="b1"):
+        self.store.register_boundary_admission(boundary_version, "c" * 64, 430.0, "EPSG:4326", accepted=True)
+
     def test_new_task_creates_all_22_indicators_and_real_maize_evidence(self):
         task = self.store.create_task(
             region_code="110108",
@@ -93,6 +96,7 @@ class TaskServiceTests(unittest.TestCase):
         )
         self.store.connection.commit()
         self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
 
         snapshot = self.store.create_snapshot(task["task_id"])
 
@@ -113,6 +117,29 @@ class TaskServiceTests(unittest.TestCase):
 
         self.assertIn("formula_version:P1", raised.exception.blocking)
         self.assertIn("formula_version:C3", raised.exception.blocking)
+
+    def test_snapshot_requires_a_reviewed_boundary_version_and_freezes_its_hash(self):
+        """Break caught: an arbitrary boundary label could enter a formal 2024 full-region snapshot."""
+        self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
+
+        with self.assertRaises(SnapshotBlocked) as raised:
+            self.store.create_snapshot(task["task_id"])
+        self.assertIn("boundary_version:b1", raised.exception.blocking)
+
+        self.register_test_boundary()
+        snapshot = self.store.create_snapshot(task["task_id"])
+        graph_json = self.store.connection.execute(
+            "SELECT graph_json FROM snapshots WHERE snapshot_id=?", (snapshot["snapshot_id"],)
+        ).fetchone()["graph_json"]
+
+        self.assertIn('"geometry_sha256": "' + "c" * 64 + '"', graph_json)
 
     def test_run_rejects_an_unknown_snapshot(self):
         """Break caught: a caller could launch a calculation without frozen reviewed inputs."""
@@ -185,6 +212,7 @@ class TaskServiceTests(unittest.TestCase):
         )
         self.store.connection.commit()
         self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
 
         snapshot = self.store.create_snapshot(task["task_id"])
 
@@ -200,6 +228,7 @@ class TaskServiceTests(unittest.TestCase):
         )
         self.store.connection.commit()
         self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
         snapshot = self.store.create_snapshot(task["task_id"])
 
         first = self.store.create_run(snapshot["snapshot_id"], "run-request-1")

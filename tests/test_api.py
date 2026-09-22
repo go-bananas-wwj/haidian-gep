@@ -67,6 +67,9 @@ class ApiTests(unittest.TestCase):
                 proposal["formula_version_id"], 1, "approved", "method-reviewer", "verified",
             )
 
+    def register_test_boundary(self, boundary_version="b1"):
+        self.app.store.register_boundary_admission(boundary_version, "c" * 64, 430.0, "EPSG:4326", accepted=True)
+
     def test_create_task_returns_real_graph_and_snapshot_blockers(self):
         status, task, _ = self.request("POST", "/tasks", {
             "region_code": "110108", "year": 2024, "boundary_version": "b1",
@@ -180,6 +183,7 @@ class ApiTests(unittest.TestCase):
         )
         self.app.store.connection.commit()
         self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
         snapshot = self.app.store.create_snapshot(task["task_id"])
 
         status, run, _ = self.request("POST", "/runs", {
@@ -200,6 +204,7 @@ class ApiTests(unittest.TestCase):
         )
         self.app.store.connection.commit()
         self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
         snapshot = self.app.store.create_snapshot(task["task_id"])
         run = self.app.store.create_run(snapshot["snapshot_id"], "run-request-1")
 
@@ -222,6 +227,7 @@ class ApiTests(unittest.TestCase):
         )
         self.app.store.connection.commit()
         self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
         snapshot = self.app.store.create_snapshot(task["task_id"])
 
         status, exported, _ = self.request("GET", f"/snapshots/{snapshot['snapshot_id']}/export")
@@ -232,6 +238,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(exported["snapshot_id"], snapshot["snapshot_id"])
         self.assertEqual(len(exported["input_graph_sha256"]), 64)
         self.assertEqual(exported["data_admission"]["manifest_sha256"], "a" * 64)
+        self.assertEqual(exported["boundary_admission"]["geometry_sha256"], "c" * 64)
         self.assertEqual(len(exported["formula_versions"]), 22)
         self.assertEqual(len(exported["formula_reviews"]), 22)
         self.assertEqual(len(exported["export_sha256"]), 64)

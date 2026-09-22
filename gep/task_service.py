@@ -99,6 +99,11 @@ class GepStore:
                 data_version TEXT PRIMARY KEY, manifest_sha256 TEXT NOT NULL,
                 accepted INTEGER NOT NULL, registered_utc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS boundary_admissions (
+                boundary_version TEXT PRIMARY KEY, geometry_sha256 TEXT NOT NULL,
+                area_km2 REAL NOT NULL, crs TEXT NOT NULL, accepted INTEGER NOT NULL,
+                registered_utc TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id),
                 parent_run_id TEXT REFERENCES runs(run_id), idempotency_key TEXT NOT NULL,
@@ -141,6 +146,32 @@ class GepStore:
             self.connection.execute(
                 "INSERT INTO data_admissions VALUES (?,?,?,?)",
                 (data_version, manifest_sha256, int(accepted), _utc_now()),
+            )
+
+    def register_boundary_admission(
+        self, boundary_version: str, geometry_sha256: str, area_km2: float, crs: str, accepted: bool,
+    ) -> None:
+        """Persist one immutable boundary review for a task's full-region scope."""
+        if not boundary_version.strip() or not crs.strip():
+            raise ValueError("boundary version and CRS are required")
+        if len(geometry_sha256) != 64 or any(character not in "0123456789abcdef" for character in geometry_sha256.lower()):
+            raise ValueError("boundary geometry must have a SHA-256 hash")
+        if isinstance(area_km2, bool) or not isinstance(area_km2, (int, float)) or not math.isfinite(area_km2) or area_km2 <= 0:
+            raise ValueError("boundary area must be a positive finite square-kilometre value")
+        existing = self.connection.execute(
+            "SELECT geometry_sha256,area_km2,crs,accepted FROM boundary_admissions WHERE boundary_version=?",
+            (boundary_version,),
+        ).fetchone()
+        if existing is not None:
+            expected = (geometry_sha256.lower(), float(area_km2), crs, int(accepted))
+            actual = (existing["geometry_sha256"], existing["area_km2"], existing["crs"], existing["accepted"])
+            if actual != expected:
+                raise ConflictError("boundary admission is immutable; use a new boundary version")
+            return
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO boundary_admissions VALUES (?,?,?,?,?,?)",
+                (boundary_version, geometry_sha256.lower(), float(area_km2), crs, int(accepted), _utc_now()),
             )
 
     def _event(self, task_id: str, node_id: str | None, event_type: str, payload: dict[str, Any]) -> None:
@@ -371,10 +402,20 @@ class GepStore:
         ).fetchone()
         if admission is None or not bool(admission["accepted"]):
             blocking.append(f"data_version:{graph['task']['data_version']}")
+        boundary = self.connection.execute(
+            "SELECT geometry_sha256,area_km2,crs,accepted FROM boundary_admissions WHERE boundary_version=?",
+            (graph["task"]["boundary_version"],),
+        ).fetchone()
+        if boundary is None or not bool(boundary["accepted"]):
+            blocking.append(f"boundary_version:{graph['task']['boundary_version']}")
         if blocking:
             raise SnapshotBlocked(blocking)
         graph["data_admission"] = {
             "data_version": graph["task"]["data_version"], "manifest_sha256": admission["manifest_sha256"],
+        }
+        graph["boundary_admission"] = {
+            "boundary_version": graph["task"]["boundary_version"], "geometry_sha256": boundary["geometry_sha256"],
+            "area_km2": boundary["area_km2"], "crs": boundary["crs"],
         }
         graph["formula_versions"] = formula_versions
         snapshot_id = uuid.uuid4().hex
@@ -454,6 +495,7 @@ class GepStore:
             "formal_gep_value": None,
             "frozen_graph": graph,
             "data_admission": graph.get("data_admission"),
+            "boundary_admission": graph.get("boundary_admission"),
             "node_reviews": node_reviews,
             "formula_versions": formula_versions,
             "formula_reviews": formula_reviews,
