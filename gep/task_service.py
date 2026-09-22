@@ -66,7 +66,8 @@ class GepStore:
             CREATE TABLE IF NOT EXISTS tasks (
                 task_id TEXT PRIMARY KEY, region_code TEXT NOT NULL, year INTEGER NOT NULL,
                 boundary_version TEXT NOT NULL, standard_version TEXT NOT NULL,
-                data_version TEXT NOT NULL, created_utc TEXT NOT NULL
+                data_version TEXT NOT NULL, created_utc TEXT NOT NULL,
+                graph_version INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS nodes (
                 node_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
@@ -127,6 +128,9 @@ class GepStore:
             );
             """
         )
+        task_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(tasks)")}
+        if "graph_version" not in task_columns:
+            self.connection.execute("ALTER TABLE tasks ADD COLUMN graph_version INTEGER NOT NULL DEFAULT 1")
         self.connection.commit()
 
     def register_data_admission(self, data_version: str, manifest_sha256: str, accepted: bool) -> None:
@@ -180,6 +184,9 @@ class GepStore:
             (task_id, node_id, event_type, _utc_now(), json.dumps(payload, ensure_ascii=False, sort_keys=True)),
         )
 
+    def _bump_graph_version(self, task_id: str) -> None:
+        self.connection.execute("UPDATE tasks SET graph_version=graph_version+1 WHERE task_id=?", (task_id,))
+
     def create_task(
         self, region_code: str, year: int, boundary_version: str, standard_version: str, data_version: str,
     ) -> dict[str, str]:
@@ -189,8 +196,8 @@ class GepStore:
             raise ValueError("boundary, standard, and data versions are required")
         task_id = uuid.uuid4().hex
         self.connection.execute(
-            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?)",
-            (task_id, region_code, year, boundary_version, standard_version, data_version, _utc_now()),
+            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?)",
+            (task_id, region_code, year, boundary_version, standard_version, data_version, _utc_now(), 1),
         )
         categories = (("material", "物质产品"), ("regulating", "调节服务"), ("cultural", "文化服务"))
         for key, label in categories:
@@ -229,6 +236,54 @@ class GepStore:
         self._event(task_id, None, "task.created", {"indicator_count": len(INDICATORS), "data_version": data_version})
         self.connection.commit()
         return {"task_id": task_id}
+
+    @staticmethod
+    def _node_blockers(nodes: list[dict[str, Any]]) -> list[str]:
+        indicators = {node["node_key"]: node for node in nodes if node["kind"] == "indicator"}
+        blocking = []
+        for node in nodes:
+            if not node["required"]:
+                continue
+            if node["kind"] == "indicator":
+                if node["applicability_status"] not in {"applicable", "not_applicable", "verified_zero"}:
+                    blocking.append(node["node_key"])
+                elif node["review_status"] != "approved":
+                    blocking.append(node["node_key"])
+                continue
+            parent = indicators.get(node["parent_key"])
+            if parent is not None and parent["applicability_status"] in {"not_applicable", "verified_zero"}:
+                continue
+            if node["review_status"] != "approved" or node["value"] is None:
+                blocking.append(node["node_key"])
+        return blocking
+
+    def list_tasks(self) -> list[dict[str, Any]]:
+        """Return persistent task-center summaries without creating or changing a task."""
+        task_rows = self.connection.execute(
+            "SELECT * FROM tasks ORDER BY created_utc DESC, task_id DESC"
+        ).fetchall()
+        summaries = []
+        for task_row in task_rows:
+            task = dict(task_row)
+            graph = self.graph(task["task_id"])
+            nodes = graph["nodes"]
+            latest_run = self.connection.execute(
+                "SELECT runs.run_id,runs.status,runs.reason,runs.created_utc FROM runs "
+                "JOIN snapshots ON snapshots.snapshot_id=runs.snapshot_id "
+                "WHERE snapshots.task_id=? ORDER BY runs.created_utc DESC,runs.run_id DESC LIMIT 1",
+                (task["task_id"],),
+            ).fetchone()
+            blocked_supplements = self.connection.execute(
+                "SELECT COUNT(*) FROM supplement_jobs WHERE task_id=? AND status='blocked'", (task["task_id"],)
+            ).fetchone()[0]
+            summaries.append({
+                **task,
+                "pending_review_count": sum(node["review_status"] == "pending_review" for node in nodes),
+                "node_blocker_count": len(self._node_blockers(nodes)),
+                "blocked_supplement_count": blocked_supplements,
+                "latest_run": dict(latest_run) if latest_run is not None else None,
+            })
+        return summaries
 
     def _insert_node(
         self, task_id: str, node_key: str, parent_key: str | None, kind: str, label: str, category: str,
@@ -354,6 +409,7 @@ class GepStore:
                 "INSERT INTO reviews VALUES (?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, node_id, expected_version, decision, reviewer, note, _utc_now()),
             )
+            self._bump_graph_version(row["task_id"])
             self._event(row["task_id"], node_id, f"node.{decision}", {"version": expected_version, "reviewer": reviewer})
         return self.node(row["task_id"], row["node_key"])
 
@@ -386,6 +442,7 @@ class GepStore:
             )
             if updated.rowcount != 1:
                 raise ConflictError("node version is stale")
+            self._bump_graph_version(row["task_id"])
             self._event(row["task_id"], node_id, "node.revised", {
                 "version": next_version, "operator": operator, "reason": reason,
                 "previous_value": previous_value, "value": value, "unit": unit,
@@ -428,21 +485,7 @@ class GepStore:
         graph = self.graph(task_id)
         nodes = graph["nodes"]
         indicators = {node["node_key"]: node for node in nodes if node["kind"] == "indicator"}
-        blocking: list[str] = []
-        for node in nodes:
-            if not node["required"]:
-                continue
-            if node["kind"] == "indicator":
-                if node["applicability_status"] not in {"applicable", "not_applicable", "verified_zero"}:
-                    blocking.append(node["node_key"])
-                elif node["review_status"] != "approved":
-                    blocking.append(node["node_key"])
-                continue
-            parent = indicators.get(node["parent_key"])
-            if parent is not None and parent["applicability_status"] in {"not_applicable", "verified_zero"}:
-                continue
-            if node["review_status"] != "approved" or node["value"] is None:
-                blocking.append(node["node_key"])
+        blocking = self._node_blockers(nodes)
         formula_versions: list[dict[str, Any]] = []
         for indicator_id, indicator in indicators.items():
             if indicator["applicability_status"] != "applicable":

@@ -84,6 +84,45 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(blocked_status, 422)
         self.assertIn("P1.maize.quantity", blocked["blocking_nodes"])
 
+    def test_task_center_lists_persisted_task_state_and_latest_run(self):
+        """Break caught: a refresh could leave users unable to find a persisted task or its blockers."""
+        _, first, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+        _, second, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b2",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+
+        status, listing, _ = self.request("GET", "/tasks")
+
+        self.assertEqual(status, 200)
+        self.assertEqual([task["task_id"] for task in listing["tasks"]], [second["task_id"], first["task_id"]])
+        item = listing["tasks"][0]
+        self.assertEqual(item["region_code"], "110108")
+        self.assertEqual(item["year"], 2024)
+        self.assertEqual(item["graph_version"], 1)
+        self.assertEqual(item["pending_review_count"], 1)
+        self.assertGreater(item["node_blocker_count"], 0)
+        self.assertEqual(item["latest_run"], None)
+
+    def test_task_center_increments_graph_version_after_a_reviewed_node_change(self):
+        """Break caught: task-center graph versions could stay stale after an audited graph mutation."""
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+        _, graph, _ = self.request("GET", f"/tasks/{task['task_id']}/graph")
+        maize = next(node for node in graph["nodes"] if node["node_key"] == "P1.maize.quantity")
+        self.request("POST", f"/nodes/{maize['node_id']}/reviews", {
+            "expected_version": 1, "decision": "approved", "note": "verified",
+        })
+
+        _, listing, _ = self.request("GET", "/tasks")
+
+        self.assertEqual(listing["tasks"][0]["graph_version"], 2)
+
     def test_appendix_e_keeps_an_incomplete_task_at_null_formal_gep(self):
         """Break caught: an incomplete task could hide indicator gaps or invent a formal total."""
         _, task, _ = self.request("POST", "/tasks", {
@@ -109,6 +148,13 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertIn('id="appendix-e"', page["html"])
+
+    def test_root_exposes_the_persisted_task_center(self):
+        """Break caught: the browser could not reopen a task saved in the persistent service."""
+        status, page, _ = self.request("GET", "/")
+
+        self.assertEqual(status, 200)
+        self.assertIn('id="task-list"', page["html"])
 
     def test_data_version_catalog_exposes_a_verified_blocked_reference_package(self):
         """Break caught: the canvas could call a reference package accounting-ready without its manifest or gaps."""

@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +50,28 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(maize["evidence"]["table_id"], "5-11")
         self.assertEqual(maize["evidence"]["printed_page"], 71)
         self.assertNotIn("synthetic", str(maize).lower())
+
+    def test_existing_task_database_migrates_to_include_graph_version(self):
+        """Break caught: the deployed pre-versioned SQLite task table could not support task-center summaries."""
+        legacy_path = Path(self.directory.name) / "legacy-tasks.sqlite3"
+        with sqlite3.connect(legacy_path) as legacy:
+            legacy.execute(
+                "CREATE TABLE tasks (task_id TEXT PRIMARY KEY, region_code TEXT NOT NULL, year INTEGER NOT NULL, "
+                "boundary_version TEXT NOT NULL, standard_version TEXT NOT NULL, data_version TEXT NOT NULL, "
+                "created_utc TEXT NOT NULL)"
+            )
+            legacy.execute(
+                "INSERT INTO tasks VALUES ('old', '110108', 2024, 'b1', 'GB/T 46869-2025', "
+                "'reference-2024-v0.1', '2026-09-22T00:00:00+00:00')"
+            )
+
+        migrated = GepStore(legacy_path)
+        try:
+            columns = {row[1] for row in migrated.connection.execute("PRAGMA table_info(tasks)")}
+        finally:
+            migrated.close()
+
+        self.assertIn("graph_version", columns)
 
     def test_task_expands_method_cards_into_required_input_nodes_without_inventing_values(self):
         """Break caught: the graph could show 22 headings while omitting their actual data requirements."""

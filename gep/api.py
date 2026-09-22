@@ -56,6 +56,8 @@ class DemoApi:
                 return self._response(start_response, 200, {"data_versions": self.data_packages.versions()})
             if method == "GET" and len(parts) == 2 and parts[0] == "data-versions":
                 return self._response(start_response, 200, self.data_packages.summary(parts[1]))
+            if method == "GET" and parts == ["tasks"]:
+                return self._response(start_response, 200, {"tasks": self.store.list_tasks()})
             if method == "POST" and parts == ["tasks"]:
                 body = self._json_body(environ)
                 task = self.store.create_task(**body)
