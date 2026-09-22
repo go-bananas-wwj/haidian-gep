@@ -3,9 +3,9 @@
 ## 已部署范围
 
 - 宿主机部署根：`/data/wwj/haidian-gep`。
-- 应用提交：`96100be`（API 数据包目录）、`6cd5e7a`（画布准入展示）、`1718a71`（本地视图布局）、`664b094`（按科目展开输入）、`0961252`（事件面板）、`e421062`（AEF 候选状态）及 `a3a7eac`（边界准入闸门），分支 `feature/haidian-gep-demo-core`。
+- 应用提交：`96100be`（API 数据包目录）、`6cd5e7a`（画布准入展示）、`1718a71`（本地视图布局）、`664b094`（按科目展开输入）、`0961252`（事件面板）、`e421062`（AEF 候选状态）、`a3a7eac`（边界准入闸门）及 `2c668a0`（待完善附录 E），分支 `feature/haidian-gep-demo-core`。
 - 服务：`task-api`（仅 Compose 内网）与 `task-web`（`127.0.0.1:9088`）。
-- API 容器镜像 ID：`sha256:6abcce967043d46d4ff35b8388c8022cbbfade323d2a5f9ac4ea0ed12e2ab060`。
+- API 容器镜像 ID：`sha256:55c013dc5f32273aacdeee6193c8f52c00fd71952bc5b2ce8333928282f89b79`。
 - 持久化卷：`runtime/` 挂载为读写；准入数据目录 `data/` 挂载到 API 的 `/var/lib/haidian-gep-data`，并由 Docker 检查为 `RW=false`。
 - 参考数据归档 SHA-256：`9793afbdeeed1a7b11195c68ead6e860ff9a03451492c262f1b299e5419bfe28`。
 
@@ -25,6 +25,7 @@
 12. 画布以 `/tasks/{id}/events?after=<sequence>` 轮询服务端递增事件并显示实际序号、类型、时间与载荷；没有新增事件时不改变图或伪造运行进度。
 13. 本地与宿主机均登记了候选台账 `00_catalog/aef_2024_candidate_tiles.json`（SHA-256 `ce44dbb8ff4c57c007af66aacd223ab0307e3ec66d40181f2c788772f3f911de`）。接口显示 3 个候选及 `unconfirmed_osm_demo_boundary`；它们仍为 bbox 候选而非已下载、已裁切或覆盖验收的 AlphaEarth 特征。
 14. 容器临时 SQLite 验证完整输入图在未登记边界时被 `boundary_version:b1` 阻断；登记测试边界后冻结图含 64 位几何哈希、面积与 CRS。生产运行库未登记边界，不能把 OSM 演示边界用于正式快照。
+15. `GET /api/tasks/{id}/appendix-e` 在容器临时 SQLite 返回 22 行当前任务科目，`formal_gep_value: null`，且 P1 保留阻断状态；该“待完善附录 E”是实时完整性报告，不是快照或正式总值。
 
 ## 运行和访问
 
