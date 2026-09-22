@@ -5,6 +5,7 @@ from gep.formulas.regulating import (
     calculate_crop_pollination,
     calculate_oxygen_from_carbon,
     calculate_soil_retention,
+    calculate_water_purification,
     calculate_water_balance,
 )
 from gep.formulas.registry import calculate_indicator
@@ -175,6 +176,33 @@ class RegulatingFormulaTests(unittest.TestCase):
             "slope_length": {"value": 1, "unit": "RUSLE-LS"},
             "cover_factor": {"value": 0, "unit": "fraction"},
             "area": {"value": 1, "unit": "hm2"},
+            "valuation_parameter": {"value": 1, "unit": "元/t"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.value_yuan, 1)
+
+    def test_r9_uses_source_resolved_load_balance_after_artificial_treatment(self):
+        result = calculate_water_purification({
+            "inflow_load": {"value": 10, "unit": "t/a"},
+            "local_emission": {"value": 5, "unit": "t/a"},
+            "outflow_load": {"value": 4, "unit": "t/a"},
+            "artificial_treatment": {"value": 3, "unit": "t/a"},
+            "valuation_parameter": {"value": 100, "unit": "元/t"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.physical_value, 8)
+        self.assertEqual(result.physical_unit, "t/a")
+        self.assertEqual(result.value_yuan, 800)
+        self.assertEqual(result.standard_clause, "A.60--A.62")
+
+    def test_registry_dispatches_r9_to_the_load_balance_method(self):
+        result = calculate_indicator("R9", {
+            "inflow_load": {"value": 1, "unit": "t/a"},
+            "local_emission": {"value": 0, "unit": "t/a"},
+            "outflow_load": {"value": 0, "unit": "t/a"},
+            "artificial_treatment": {"value": 0, "unit": "t/a"},
             "valuation_parameter": {"value": 1, "unit": "元/t"},
         })
 

@@ -148,3 +148,28 @@ def calculate_soil_retention(inputs: Mapping[str, Any]) -> MaterialResult:
         True, retained_soil, "t/a", None, value_yuan, value_yuan / 10_000,
         "A.7--A.10", "calculated", (),
     )
+
+
+def calculate_water_purification(inputs: Mapping[str, Any]) -> MaterialResult:
+    """Calculate R9 from annual boundary loads after separately recorded artificial treatment."""
+    inflow = _measurement(inputs, "inflow_load", "t/a")
+    local = _measurement(inputs, "local_emission", "t/a")
+    outflow = _measurement(inputs, "outflow_load", "t/a")
+    artificial = _measurement(inputs, "artificial_treatment", "t/a")
+    price = _measurement(inputs, "valuation_parameter", "元/t")
+    values = {
+        "inflow_load": inflow,
+        "local_emission": local,
+        "outflow_load": outflow,
+        "artificial_treatment": artificial,
+        "valuation_parameter": price,
+    }
+    invalid = [field for field, value in values.items() if value is None or value < 0]
+    if invalid:
+        return MaterialResult(False, None, None, None, None, None, "A.60--A.62", "blocked", tuple(sorted(invalid)))
+    purified_load = inflow + local - outflow - artificial
+    value_yuan = purified_load * price
+    return MaterialResult(
+        True, purified_load, "t/a", None, value_yuan, value_yuan / 10_000,
+        "A.60--A.62", "requires_human_review" if purified_load < 0 else "calculated", (),
+    )

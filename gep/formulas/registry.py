@@ -10,7 +10,7 @@ from .material import (
     calculate_freshwater_supply,
     calculate_residual_value,
 )
-from .regulating import calculate_carbon_from_npp, calculate_crop_pollination, calculate_oxygen_from_carbon, calculate_soil_retention, calculate_water_balance
+from .regulating import calculate_carbon_from_npp, calculate_crop_pollination, calculate_oxygen_from_carbon, calculate_soil_retention, calculate_water_balance, calculate_water_purification
 from .cultural import calculate_landscape_premium, calculate_recreation_time, calculate_travel_cost
 
 
@@ -40,6 +40,8 @@ def calculate_indicator(indicator_id: str, inputs: Mapping[str, Any]) -> Materia
         return calculate_water_balance(inputs)
     if indicator_id == "R2":
         return calculate_soil_retention(inputs)
+    if indicator_id == "R9":
+        return calculate_water_purification(inputs)
     if indicator_id == "R12":
         return calculate_crop_pollination(inputs)
     if indicator_id == "C1":
