@@ -28,6 +28,7 @@
 15. `GET /api/tasks/{id}/appendix-e` 在容器临时 SQLite 返回 22 行当前任务科目，`formal_gep_value: null`，且 P1 保留阻断状态；该“待完善附录 E”是实时完整性报告，不是快照或正式总值。
 16. 宿主机首页实测包含“查看待完善附录 E”操作入口；它只读取任务当前状态并展示 22 科目、输入证据与阻断节点，不创建快照或运行。
 17. 升级后通过宿主机 API 读取已有持久化任务：`graph_version=1`、`pending_review_count=1`、`node_blocker_count=23`、无最近运行；首页实测包含任务中心入口。运行库的旧 `tasks` 表已在启动时安全补入默认值为 1 的图版本列。
+18. 宿主机运行库已执行 SQLite 在线备份并在新的恢复目录复原；备份文件 SHA-256 验证成功，原库与恢复库均读取到 1 个任务。备份为 `/data/wwj/haidian-gep/backups/runtime-20260922T091048Z`，恢复验证目录为 `/data/wwj/haidian-gep/restore-validation-20260922T091048Z`；准入数据卷没有复制或写入。
 
 ## 运行和访问
 
