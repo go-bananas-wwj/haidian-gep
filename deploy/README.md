@@ -10,10 +10,10 @@
 cd /srv/haidian-gep/app/deploy
 export GEP_RUNTIME_DIR=/srv/haidian-gep/runtime
 docker compose -f compose.demo.yml up -d --build
-curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:9088/api/health
 ```
 
-API 为 `127.0.0.1:8000`，画布为 `127.0.0.1:8080`；画布经 `/api/` 代理访问 API，不会启动第二个 SQLite 写进程。在反向代理、访问控制和 TLS 经过主机核查前，不得将任一端口公开到互联网。
+API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0.0.1:9088`，经 `/api/` 代理访问 API，不会启动第二个 SQLite 写进程。`9088` 是用户于 2026-09-22 批准的入口；在反向代理、访问控制和 TLS 经过主机核查前，不得将其公开到互联网。
 
 ## Dify
 
