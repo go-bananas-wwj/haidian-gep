@@ -98,7 +98,8 @@ class GepStore:
             );
             CREATE TABLE IF NOT EXISTS data_admissions (
                 data_version TEXT PRIMARY KEY, manifest_sha256 TEXT NOT NULL,
-                accepted INTEGER NOT NULL, registered_utc TEXT NOT NULL
+                accepted INTEGER NOT NULL, registered_utc TEXT NOT NULL,
+                registered_by TEXT NOT NULL DEFAULT 'legacy_unknown'
             );
             CREATE TABLE IF NOT EXISTS boundary_admissions (
                 boundary_version TEXT PRIMARY KEY, geometry_sha256 TEXT NOT NULL,
@@ -131,26 +132,30 @@ class GepStore:
         task_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(tasks)")}
         if "graph_version" not in task_columns:
             self.connection.execute("ALTER TABLE tasks ADD COLUMN graph_version INTEGER NOT NULL DEFAULT 1")
+        admission_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(data_admissions)")}
+        if "registered_by" not in admission_columns:
+            self.connection.execute("ALTER TABLE data_admissions ADD COLUMN registered_by TEXT NOT NULL DEFAULT 'legacy_unknown'")
         self.connection.commit()
 
-    def register_data_admission(self, data_version: str, manifest_sha256: str, accepted: bool) -> None:
+    def register_data_admission(self, data_version: str, manifest_sha256: str, accepted: bool, registered_by: str = "system") -> dict[str, Any]:
         """Persist one immutable data-version admission decision."""
-        if not data_version.strip():
+        if not data_version.strip() or not registered_by.strip():
             raise ValueError("data version is required")
         if len(manifest_sha256) != 64 or any(character not in "0123456789abcdef" for character in manifest_sha256.lower()):
             raise ValueError("admission manifest must have a SHA-256 hash")
         existing = self.connection.execute(
-            "SELECT manifest_sha256,accepted FROM data_admissions WHERE data_version=?", (data_version,)
+            "SELECT manifest_sha256,accepted,registered_by FROM data_admissions WHERE data_version=?", (data_version,)
         ).fetchone()
         if existing is not None:
             if existing["manifest_sha256"] != manifest_sha256 or bool(existing["accepted"]) != accepted:
                 raise ConflictError("data admission is immutable; use a new data version")
-            return
+            return {"data_version": data_version, "manifest_sha256": existing["manifest_sha256"], "accepted": bool(existing["accepted"]), "registered_by": existing["registered_by"]}
         with self.connection:
             self.connection.execute(
-                "INSERT INTO data_admissions VALUES (?,?,?,?)",
-                (data_version, manifest_sha256, int(accepted), _utc_now()),
+                "INSERT INTO data_admissions VALUES (?,?,?,?,?)",
+                (data_version, manifest_sha256, int(accepted), _utc_now(), registered_by),
             )
+        return {"data_version": data_version, "manifest_sha256": manifest_sha256, "accepted": accepted, "registered_by": registered_by}
 
     def register_boundary_admission(
         self, boundary_version: str, geometry_sha256: str, area_km2: float, crs: str, accepted: bool,

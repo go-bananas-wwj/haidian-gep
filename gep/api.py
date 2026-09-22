@@ -56,6 +56,11 @@ class DemoApi:
                 return self._response(start_response, 200, {"data_versions": self.data_packages.versions()})
             if method == "GET" and len(parts) == 2 and parts[0] == "data-versions":
                 return self._response(start_response, 200, self.data_packages.summary(parts[1]))
+            if method == "POST" and parts == ["data-admissions"]:
+                actor = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                if not actor:
+                    return self._response(start_response, 503, {"error": "trusted data-custodian identity is not configured"})
+                return self._response(start_response, 201, self.store.register_data_admission(registered_by=actor, **self._json_body(environ)))
             if method == "GET" and parts == ["tasks"]:
                 return self._response(start_response, 200, {"tasks": self.store.list_tasks()})
             if method == "POST" and parts == ["tasks"]:

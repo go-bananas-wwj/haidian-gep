@@ -175,6 +175,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(package["alphaearth_candidates"]["boundary_statuses"], ["unconfirmed_osm_demo_boundary"])
         self.assertFalse(package["alphaearth_candidates"]["coverage_validated"])
 
+    def test_data_admission_requires_a_trusted_actor_and_records_it(self):
+        """Break caught: an unauthenticated caller could admit a data version for formal snapshots."""
+        body = {"data_version": "audited-2024-v1", "manifest_sha256": "a" * 64, "accepted": True}
+
+        denied_status, _, _ = self.request("POST", "/data-admissions", body, actor="")
+        status, admission, _ = self.request("POST", "/data-admissions", body, actor="data-custodian")
+
+        self.assertEqual(denied_status, 503)
+        self.assertEqual(status, 201)
+        self.assertEqual(admission["data_version"], "audited-2024-v1")
+        self.assertEqual(admission["registered_by"], "data-custodian")
+
     def test_stale_review_returns_409_and_evidence_is_readable(self):
         _, task, _ = self.request("POST", "/tasks", {
             "region_code": "110108", "year": 2024, "boundary_version": "b1",
