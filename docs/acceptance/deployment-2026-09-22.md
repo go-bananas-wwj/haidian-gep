@@ -3,9 +3,9 @@
 ## 已部署范围
 
 - 宿主机部署根：`/data/wwj/haidian-gep`。
-- 应用提交：`9f4ad06`（分支 `feature/haidian-gep-demo-core`）。
+- 应用提交：`fc9d5b8`（分支 `feature/haidian-gep-demo-core`）。
 - 服务：`task-api`（仅 Compose 内网）与 `task-web`（`127.0.0.1:9088`）。
-- API 容器镜像 ID：`sha256:913c9ff17481935e31700ff368661d26cc9a638627c2f8204d0c23369255a119`。
+- API 容器镜像 ID：`sha256:70f6f476531ac848e55dabddafbcedc860e2de4344b1c414c1f7eb40ee7be9d1`。
 - 持久化卷：`runtime/` 挂载为读写；准入数据目录 `data/` 挂载到 API 的 `/var/lib/haidian-gep-data`，并由 Docker 检查为 `RW=false`。
 - 参考数据归档 SHA-256：`9793afbdeeed1a7b11195c68ead6e860ff9a03451492c262f1b299e5419bfe28`。
 
@@ -18,6 +18,7 @@
 5. 该任务创建正式快照返回 HTTP `422`，共 24 个阻断项。该行为符合“数据未审核、价格/成本及其他科目输入缺失时不得产生正式 GEP”的准入规则。
 6. 部署后在容器内的临时 SQLite 上完成“22 项获审方法/参数版本 → 冻结快照 → 运行”校验：快照记录 22 个公式版本，运行链输入图 SHA-256 长度为 64，运行因“确定性计算引擎尚未配置”保持 `blocked`。该校验不写入持久化运行库。
 7. 新任务模板按 22 张方法卡展开 98 个待补输入节点；每张卡含国标附录范围、必填字段、适用性与去重规则。R4 在内陆边界证据通过审核后可以标记为“不适用”，此时不要求海岸计价字段。
+8. 临时 SQLite 导出校验返回 22 个公式版本、22 组公式审核记录和 `formal_gep_value: null`；移除 `export_sha256` 后复算 SHA-256 一致。导出校验不写入持久化运行库。
 
 ## 运行和访问
 
