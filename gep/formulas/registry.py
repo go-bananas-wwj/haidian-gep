@@ -21,7 +21,7 @@ def calculate_indicator(indicator_id: str, inputs: Mapping[str, Any]) -> Materia
     """
     if indicator_id not in _CARDS:
         raise ValueError("indicator must be one of the 22 registered GEP subjects")
-    if indicator_id in {"P1", "P2"}:
+    if indicator_id in {"P1", "P2", "P3", "P4", "P7"}:
         return calculate_residual_value(indicator_id, inputs)
     if indicator_id == "R6":
         return calculate_carbon_from_npp(inputs)

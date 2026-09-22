@@ -426,7 +426,8 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(run["status"], "blocked")
         self.assertIsNone(chain["calculation"]["formal_gep_value_yuan"])
         self.assertEqual(chain["calculation"]["item_results"]["P1"]["value_yuan"], 350_000)
-        self.assertIn("P4:method_implementation_pending", chain["calculation"]["blocking_nodes"])
+        self.assertIn("P4:producer_price", chain["calculation"]["blocking_nodes"])
+        self.assertIn("P4:production_cost", chain["calculation"]["blocking_nodes"])
 
     def test_review_requires_current_node_version(self):
         task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")

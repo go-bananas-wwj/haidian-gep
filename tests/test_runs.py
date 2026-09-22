@@ -28,7 +28,8 @@ class FrozenRunTests(unittest.TestCase):
         self.assertIsNone(run.formal_gep_value_yuan)
         self.assertEqual(run.item_results["P1"]["value_yuan"], 350_000)
         self.assertEqual(run.partial_category_totals_yuan["material"], 350_000)
-        self.assertIn("P4:method_implementation_pending", run.blocking_nodes)
+        self.assertIn("P4:producer_price", run.blocking_nodes)
+        self.assertIn("P4:production_cost", run.blocking_nodes)
         self.assertIn("R1:missing_indicator", run.blocking_nodes)
 
     def test_non_applicable_indicator_is_not_an_execution_blocker_or_zero_estimate(self):
