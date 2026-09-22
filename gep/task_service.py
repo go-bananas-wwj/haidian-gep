@@ -92,9 +92,32 @@ class GepStore:
                 status TEXT NOT NULL, reason TEXT NOT NULL, created_utc TEXT NOT NULL,
                 UNIQUE(task_id, node_id, idempotency_key)
             );
+            CREATE TABLE IF NOT EXISTS data_admissions (
+                data_version TEXT PRIMARY KEY, manifest_sha256 TEXT NOT NULL,
+                accepted INTEGER NOT NULL, registered_utc TEXT NOT NULL
+            );
             """
         )
         self.connection.commit()
+
+    def register_data_admission(self, data_version: str, manifest_sha256: str, accepted: bool) -> None:
+        """Persist one immutable data-version admission decision."""
+        if not data_version.strip():
+            raise ValueError("data version is required")
+        if len(manifest_sha256) != 64 or any(character not in "0123456789abcdef" for character in manifest_sha256.lower()):
+            raise ValueError("admission manifest must have a SHA-256 hash")
+        existing = self.connection.execute(
+            "SELECT manifest_sha256,accepted FROM data_admissions WHERE data_version=?", (data_version,)
+        ).fetchone()
+        if existing is not None:
+            if existing["manifest_sha256"] != manifest_sha256 or bool(existing["accepted"]) != accepted:
+                raise ConflictError("data admission is immutable; use a new data version")
+            return
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO data_admissions VALUES (?,?,?,?)",
+                (data_version, manifest_sha256, int(accepted), _utc_now()),
+            )
 
     def _event(self, task_id: str, node_id: str | None, event_type: str, payload: dict[str, Any]) -> None:
         self.connection.execute(
@@ -267,14 +290,20 @@ class GepStore:
         return {"job_id": job_id, "status": "blocked", "reason": reason}
 
     def create_snapshot(self, task_id: str) -> dict[str, str]:
-        nodes = self.graph(task_id)["nodes"]
+        graph = self.graph(task_id)
+        nodes = graph["nodes"]
         blocking = [node["node_key"] for node in nodes if node["required"] and (
             node["applicability_status"] == "pending" or node["review_status"] != "approved" or node["value"] is None
         )]
+        admission = self.connection.execute(
+            "SELECT accepted FROM data_admissions WHERE data_version=?", (graph["task"]["data_version"],)
+        ).fetchone()
+        if admission is None or not bool(admission["accepted"]):
+            blocking.append(f"data_version:{graph['task']['data_version']}")
         if blocking:
             raise SnapshotBlocked(blocking)
         snapshot_id = uuid.uuid4().hex
-        graph_json = json.dumps(self.graph(task_id), ensure_ascii=False, sort_keys=True)
+        graph_json = json.dumps(graph, ensure_ascii=False, sort_keys=True)
         with self.connection:
             self.connection.execute("INSERT INTO snapshots VALUES (?,?,?,?)", (snapshot_id, task_id, graph_json, _utc_now()))
             self._event(task_id, None, "snapshot.created", {"snapshot_id": snapshot_id})

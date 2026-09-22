@@ -4,6 +4,8 @@ import hashlib
 import math
 from pathlib import Path
 
+from .admission import INDICATOR_IDS, admit
+
 FIELDS = {'region_code', 'year', 'table_id', 'printed_page', 'pdf_page',
           'source_file', 'metric', 'value', 'unit', 'status', 'notes'}
 STATUSES = {'observed', 'blank_unresolved', 'scope_conflict'}
@@ -71,3 +73,34 @@ def build(path):
             row['source_distribution'] = 'local_original_only; follow official source link'
             result['observations' if row['status'] == 'observed' else 'pending'].append(row)
     return result
+
+
+def build_reference_admission(path):
+    """Import yearbook rows into an explicitly unreviewed admission manifest.
+
+    The source CSV is read only.  Its observations are useful evidence, but
+    they cannot become accounting inputs until a person approves the source,
+    units, applicability and the method-specific required fields.
+    """
+    catalog = build(path)
+    source_hash = catalog["source_sha256"]
+    records = []
+    for row in catalog["observations"] + catalog["pending"]:
+        records.append({
+            "node_id": f"reference.{row['row_id']}",
+            "indicator_id": "reference",
+            "region_code": row["region_code"],
+            "year": row["year"],
+            "source_id": "haidian_yearbook_2025",
+            "value": row["value"],
+            "unit": row["unit"],
+            "raw_status": row["status"],
+            "status": "pending_review",
+            "sha256": source_hash,
+            "product_id": "",
+            "table_id": row["table_id"],
+            "printed_page": row["printed_page"],
+            "metric": row["metric"],
+            "source_file": row["source_file"],
+        })
+    return admit(records, {indicator_id: "pending" for indicator_id in INDICATOR_IDS}, {}, [])

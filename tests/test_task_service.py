@@ -47,6 +47,32 @@ class TaskServiceTests(unittest.TestCase):
         self.assertIn("R4", blocking)
         self.assertGreaterEqual(len(blocking), 22)
 
+    def test_snapshot_stays_blocked_when_data_version_has_not_passed_admission(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.store.connection.commit()
+
+        with self.assertRaises(SnapshotBlocked) as raised:
+            self.store.create_snapshot(task["task_id"])
+
+        self.assertIn("data_version:reference-2024-v0.1", raised.exception.blocking)
+
+    def test_admitted_data_version_allows_a_complete_reviewed_graph_to_freeze(self):
+        self.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.store.connection.commit()
+
+        snapshot = self.store.create_snapshot(task["task_id"])
+
+        self.assertTrue(snapshot["snapshot_id"])
+
     def test_review_requires_current_node_version(self):
         task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
         maize = self.store.node(task["task_id"], "P1.maize.quantity")
