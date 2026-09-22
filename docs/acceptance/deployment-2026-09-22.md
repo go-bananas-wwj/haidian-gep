@@ -3,9 +3,9 @@
 ## 已部署范围
 
 - 宿主机部署根：`/data/wwj/haidian-gep`。
-- 应用提交：`8b8bc42`（分支 `feature/haidian-gep-demo-core`）。
+- 应用提交：`18f7a9b`（分支 `feature/haidian-gep-demo-core`）。
 - 服务：`task-api`（仅 Compose 内网）与 `task-web`（`127.0.0.1:9088`）。
-- API 容器镜像 ID：`sha256:fa115a49b560221fb1ed9716c61d9ce903d85ebd299f715b6083ffe2df6c5d73`。
+- API 容器镜像 ID：`sha256:7d4e590979276a4f16fde386a1c2294b560a069553d260078c49095467a92e85`。
 - 持久化卷：`runtime/` 挂载为读写；准入数据目录 `data/` 挂载到 API 的 `/var/lib/haidian-gep-data`，并由 Docker 检查为 `RW=false`。
 - 参考数据归档 SHA-256：`9793afbdeeed1a7b11195c68ead6e860ff9a03451492c262f1b299e5419bfe28`。
 
@@ -16,6 +16,8 @@
 3. `GET http://127.0.0.1:9088/api/health` 返回 `{"status": "ok"}`；Web 首页可读取。
 4. 通过 Web 代理创建 2024 海淀任务，返回 22 个指标节点；玉米来源节点为 `2935.1 t/a`、年鉴来源、`pending_review`。
 5. 该任务创建正式快照返回 HTTP `422`，共 24 个阻断项。该行为符合“数据未审核、价格/成本及其他科目输入缺失时不得产生正式 GEP”的准入规则。
+6. 运行链接口以冻结快照和幂等键创建 `blocked` run，返回输入图 SHA-256；由于 22 项方法卡与参数尚未逐项人工批准，服务不会生成计算结果。
+7. 新任务模板按 22 张方法卡展开 98 个待补输入节点；每张卡含国标附录范围、必填字段、适用性与去重规则。R4 在内陆边界证据通过审核后可以标记为“不适用”，此时不要求海岸计价字段。
 
 ## 运行和访问
 
