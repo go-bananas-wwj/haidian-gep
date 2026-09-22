@@ -99,6 +99,31 @@ class ApiTests(unittest.TestCase):
         self.assertIn("data_version:reference-2024-v0.1", readiness["blocking_nodes"])
         self.assertIn("boundary_version:b1", readiness["blocking_nodes"])
 
+    def test_task_snapshot_listing_recovers_the_latest_frozen_snapshot(self):
+        """Break caught: a reloaded canvas could lose the frozen snapshot required to run a reviewed graph."""
+        self.app.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)
+        task = self.app.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "audited-2024-v1")
+        self.app.store.connection.execute(
+            "UPDATE nodes SET value_json='1', review_status='approved', applicability_status='applicable' WHERE task_id=? AND required=1",
+            (task["task_id"],),
+        )
+        self.app.store.connection.commit()
+        self.approve_all_formula_versions("audited-2024-v1")
+        self.register_test_boundary()
+        snapshot = self.app.store.create_snapshot(task["task_id"])
+
+        status, payload, _ = self.request("GET", f"/tasks/{task['task_id']}/snapshots")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["snapshots"][0]["snapshot_id"], snapshot["snapshot_id"])
+
+    def test_root_exposes_the_run_execution_action(self):
+        """Break caught: a frozen reviewed graph had no browser action to request its deterministic run."""
+        status, page, _ = self.request("GET", "/")
+
+        self.assertEqual(status, 200)
+        self.assertIn('id="execute-run"', page["html"])
+
     def test_task_center_lists_persisted_task_state_and_latest_run(self):
         """Break caught: a refresh could leave users unable to find a persisted task or its blockers."""
         _, first, _ = self.request("POST", "/tasks", {

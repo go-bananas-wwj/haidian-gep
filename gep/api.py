@@ -131,6 +131,8 @@ class DemoApi:
                     return self._response(start_response, 200, {"events": self.store.events(task_id, after)})
                 if method == "POST" and parts[2:] == ["supplement"]:
                     return self._response(start_response, 202, self.store.request_supplement(task_id, **self._json_body(environ)))
+                if method == "GET" and parts[2:] == ["snapshots"]:
+                    return self._response(start_response, 200, {"snapshots": self.store.snapshots(task_id)})
                 if method == "POST" and parts[2:] == ["snapshots"]:
                     return self._response(start_response, 201, self.store.create_snapshot(task_id))
             if len(parts) >= 2 and parts[0] == "nodes":

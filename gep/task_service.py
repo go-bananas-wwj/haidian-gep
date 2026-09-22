@@ -351,6 +351,15 @@ class GepStore:
             "blocking_nodes": blocking,
         }
 
+    def snapshots(self, task_id: str) -> list[dict[str, Any]]:
+        """List immutable snapshots for task recovery without exposing mutable graph state."""
+        self.graph(task_id)
+        rows = self.connection.execute(
+            "SELECT snapshot_id,created_utc FROM snapshots WHERE task_id=? ORDER BY created_utc DESC,snapshot_id DESC",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def _insert_node(
         self, task_id: str, node_key: str, parent_key: str | None, kind: str, label: str, category: str,
         required: bool, value: Any, unit: str | None, evidence: dict[str, Any], acquisition_status: str,
