@@ -175,6 +175,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(package["alphaearth_candidates"]["boundary_statuses"], ["unconfirmed_osm_demo_boundary"])
         self.assertFalse(package["alphaearth_candidates"]["coverage_validated"])
 
+    def test_indicator_catalog_returns_all_22_reviewable_method_cards(self):
+        """Break caught: an API client could create a task without seeing a subject's method contract."""
+        status, catalog, _ = self.request("GET", "/indicator-catalog")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(catalog["indicators"]), 22)
+        carbon = next(item for item in catalog["indicators"] if item["indicator_id"] == "R6")
+        self.assertEqual(carbon["standard_clause"], "A.34--A.54")
+        self.assertIn("carbon_price", carbon["required_fields"])
+        self.assertEqual(carbon["approval_status"], "pending_human_approval")
+
     def test_data_admission_requires_a_trusted_actor_and_records_it(self):
         """Break caught: an unauthenticated caller could admit a data version for formal snapshots."""
         body = {"data_version": "audited-2024-v1", "manifest_sha256": "a" * 64, "accepted": True}

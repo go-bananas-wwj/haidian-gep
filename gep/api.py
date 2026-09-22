@@ -8,6 +8,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from .data_packages import DataPackageCatalog
+from .methods import method_cards
 from .task_service import ConflictError, GepStore, SnapshotBlocked
 
 
@@ -52,6 +53,14 @@ class DemoApi:
                 return self._html_response(start_response, (Path(__file__).parent / "web" / "index.html").read_bytes())
             if method == "GET" and path == "/health":
                 return self._response(start_response, 200, {"status": "ok"})
+            if method == "GET" and parts == ["indicator-catalog"]:
+                return self._response(start_response, 200, {"indicators": [{
+                    "indicator_id": card.indicator_id, "standard_clause": card.standard_clause,
+                    "method_id": card.method_id, "required_fields": list(card.required_fields),
+                    "applicability_rule": card.applicability_rule,
+                    "deduplication_rule": card.deduplication_rule,
+                    "approval_status": card.approval_status,
+                } for card in method_cards()]})
             if method == "GET" and parts == ["data-versions"]:
                 return self._response(start_response, 200, {"data_versions": self.data_packages.versions()})
             if method == "GET" and len(parts) == 2 and parts[0] == "data-versions":
