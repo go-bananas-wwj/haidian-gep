@@ -4,16 +4,17 @@
 
 ## 主机准入
 
-在宿主机认证恢复后，先只读核查 Docker/Compose、8000/8080、反向代理和 `/srv/haidian-gep` 是否空闲。仅当不存在冲突时，才将本仓库置于 `/srv/haidian-gep/app`，并将运行目录置于持久卷 `/srv/haidian-gep/runtime`。数据库、审核日志和运行产物必须一起备份。
+在宿主机认证恢复后，先只读核查 Docker/Compose、8000/8080、反向代理和部署根目录是否空闲。当前经批准的根目录是 `/data/wwj/haidian-gep`；应用、运行时数据库和审核事件分别位于 `app/`、`runtime/`，准入数据位于 `data/`。数据库、审核日志和运行产物必须一起备份。
 
 ```bash
-cd /srv/haidian-gep/app/deploy
-export GEP_RUNTIME_DIR=/srv/haidian-gep/runtime
+cd /data/wwj/haidian-gep/app/deploy
+export GEP_RUNTIME_DIR=/data/wwj/haidian-gep/runtime
+export GEP_DATA_DIR=/data/wwj/haidian-gep/data
 docker compose -f compose.demo.yml up -d --build
 curl --fail http://127.0.0.1:9088/api/health
 ```
 
-API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0.0.1:9088`，经 `/api/` 代理访问 API，不会启动第二个 SQLite 写进程。`9088` 是用户于 2026-09-22 批准的入口；在反向代理、访问控制和 TLS 经过主机核查前，不得将其公开到互联网。
+API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0.0.1:9088`，经 `/api/` 代理访问 API，不会启动第二个 SQLite 写进程。`data/` 以只读方式挂载进 API 容器，容器不能改写准入原件或清洗数据。`9088` 是用户于 2026-09-22 批准的入口；在反向代理、访问控制和 TLS 经过主机核查前，不得将其公开到互联网。
 
 ## Dify
 
