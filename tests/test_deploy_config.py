@@ -61,6 +61,15 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("required_inputs", page)
         self.assertIn("acquisition_status", page)
 
+    def test_canvas_polls_only_persisted_task_events(self):
+        """Break caught: the graph could animate or claim progress without reading an event sequence."""
+        page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("/events?after=", page)
+        self.assertIn("lastEvent", page)
+        self.assertIn("事件记录", page)
+        self.assertIn("setInterval", page)
+
 
 if __name__ == "__main__":
     unittest.main()
