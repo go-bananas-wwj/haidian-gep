@@ -116,3 +116,35 @@ def calculate_crop_pollination(inputs: Mapping[str, Any]) -> MaterialResult:
         True, pollinated_quantity, "t/a", None, value_yuan, value_yuan / 10_000,
         "A.70--A.71", "calculated", (),
     )
+
+
+def calculate_soil_retention(inputs: Mapping[str, Any]) -> MaterialResult:
+    """Calculate R2 as annual potential RUSLE loss less actual cover-adjusted loss."""
+    erosivity = _measurement(inputs, "rainfall_erosivity", "RUSLE-R")
+    erodibility = _measurement(inputs, "soil_erodibility", "RUSLE-K")
+    slope = _measurement(inputs, "slope_length", "RUSLE-LS")
+    cover = _measurement(inputs, "cover_factor", "fraction")
+    area = _measurement(inputs, "area", "hm2")
+    price = _measurement(inputs, "valuation_parameter", "元/t")
+    values = {
+        "rainfall_erosivity": erosivity,
+        "soil_erodibility": erodibility,
+        "slope_length": slope,
+        "cover_factor": cover,
+        "area": area,
+        "valuation_parameter": price,
+    }
+    invalid = [field for field, value in values.items() if value is None or value < 0]
+    if cover is not None and cover > 1:
+        invalid.append("cover_factor")
+    if area is not None and area <= 0 and "area" not in invalid:
+        invalid.append("area")
+    if invalid:
+        return MaterialResult(False, None, None, None, None, None, "A.7--A.10", "blocked", tuple(sorted(invalid)))
+    potential_loss = erosivity * erodibility * slope * area
+    retained_soil = potential_loss * (1 - cover)
+    value_yuan = retained_soil * price
+    return MaterialResult(
+        True, retained_soil, "t/a", None, value_yuan, value_yuan / 10_000,
+        "A.7--A.10", "calculated", (),
+    )

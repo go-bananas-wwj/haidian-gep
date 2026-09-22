@@ -4,6 +4,7 @@ from gep.formulas.regulating import (
     calculate_carbon_from_npp,
     calculate_crop_pollination,
     calculate_oxygen_from_carbon,
+    calculate_soil_retention,
     calculate_water_balance,
 )
 from gep.formulas.registry import calculate_indicator
@@ -146,6 +147,35 @@ class RegulatingFormulaTests(unittest.TestCase):
             "pollination_dependence": {"value": 1, "unit": "fraction"},
             "crop_price": {"value": 1, "unit": "元/t"},
             "deduplication_choice": {"value": "exclusive_to_r12", "unit": "choice"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.value_yuan, 1)
+
+    def test_r2_values_potential_minus_actual_rusle_soil_loss(self):
+        result = calculate_soil_retention({
+            "rainfall_erosivity": {"value": 10, "unit": "RUSLE-R"},
+            "soil_erodibility": {"value": 2, "unit": "RUSLE-K"},
+            "slope_length": {"value": 3, "unit": "RUSLE-LS"},
+            "cover_factor": {"value": 0.4, "unit": "fraction"},
+            "area": {"value": 5, "unit": "hm2"},
+            "valuation_parameter": {"value": 100, "unit": "元/t"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.physical_value, 180)
+        self.assertEqual(result.physical_unit, "t/a")
+        self.assertEqual(result.value_yuan, 18_000)
+        self.assertEqual(result.standard_clause, "A.7--A.10")
+
+    def test_registry_dispatches_r2_to_the_rusle_retention_method(self):
+        result = calculate_indicator("R2", {
+            "rainfall_erosivity": {"value": 1, "unit": "RUSLE-R"},
+            "soil_erodibility": {"value": 1, "unit": "RUSLE-K"},
+            "slope_length": {"value": 1, "unit": "RUSLE-LS"},
+            "cover_factor": {"value": 0, "unit": "fraction"},
+            "area": {"value": 1, "unit": "hm2"},
+            "valuation_parameter": {"value": 1, "unit": "元/t"},
         })
 
         self.assertTrue(result.calculated)
