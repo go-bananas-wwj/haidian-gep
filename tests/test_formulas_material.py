@@ -1,6 +1,7 @@
 import unittest
 
 from gep.formulas.material import calculate_residual_value
+from gep.formulas.registry import calculate_indicator
 
 
 class MaterialFormulaTests(unittest.TestCase):
@@ -53,6 +54,17 @@ class MaterialFormulaTests(unittest.TestCase):
         self.assertFalse(result.calculated)
         self.assertIsNone(result.value_yuan)
         self.assertEqual(result.blocking_fields, ("capital_return", "producer_price"))
+
+    def test_registry_never_substitutes_an_unimplemented_material_method_with_a_value(self):
+        result = calculate_indicator("P4", {
+            "harvest_quantity": {"value": 60, "unit": "t/a"},
+            "producer_price": {"value": 1, "unit": "元/t"},
+            "production_cost": {"value": 1, "unit": "元/a"},
+        })
+
+        self.assertFalse(result.calculated)
+        self.assertIsNone(result.value_yuan)
+        self.assertEqual(result.blocking_fields, ("method_implementation_pending",))
 
 
 if __name__ == "__main__":
