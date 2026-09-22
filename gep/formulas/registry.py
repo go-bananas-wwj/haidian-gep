@@ -5,7 +5,7 @@ from typing import Any, Mapping
 
 from ..methods import method_cards
 from .material import MaterialResult, calculate_residual_value
-from .regulating import calculate_carbon_from_npp
+from .regulating import calculate_carbon_from_npp, calculate_oxygen_from_carbon
 
 
 _CARDS = {card.indicator_id: card for card in method_cards()}
@@ -24,6 +24,8 @@ def calculate_indicator(indicator_id: str, inputs: Mapping[str, Any]) -> Materia
         return calculate_residual_value(indicator_id, inputs)
     if indicator_id == "R6":
         return calculate_carbon_from_npp(inputs)
+    if indicator_id == "R7":
+        return calculate_oxygen_from_carbon(inputs)
     return MaterialResult(
         False, None, None, None, None, None,
         _CARDS[indicator_id].standard_clause, "blocked", ("method_implementation_pending",),

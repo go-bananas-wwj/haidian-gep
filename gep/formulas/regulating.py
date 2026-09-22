@@ -46,3 +46,22 @@ def calculate_carbon_from_npp(inputs: Mapping[str, Any]) -> MaterialResult:
         True, carbon_tco2, "tCO2/a", None, value_yuan, value_yuan / 10_000,
         "A.34--A.54", "calculated", (),
     )
+
+
+def calculate_oxygen_from_carbon(inputs: Mapping[str, Any]) -> MaterialResult:
+    """Calculate R7 from a compatible annual CO₂ sequestration flow (A.55)."""
+    carbon = _measurement(inputs, "carbon_sequestration_rate", "tCO2/a")
+    price = _measurement(inputs, "oxygen_price", "元/tO2")
+    invalid = []
+    if carbon is None or carbon < 0:
+        invalid.append("carbon_sequestration_rate")
+    if price is None or price < 0:
+        invalid.append("oxygen_price")
+    if invalid:
+        return MaterialResult(False, None, None, None, None, None, "A.55--A.56", "blocked", tuple(sorted(invalid)))
+    oxygen_tonnes = carbon * (32 / 44)
+    value_yuan = oxygen_tonnes * price
+    return MaterialResult(
+        True, oxygen_tonnes, "tO2/a", None, value_yuan, value_yuan / 10_000,
+        "A.55--A.56", "calculated", (),
+    )

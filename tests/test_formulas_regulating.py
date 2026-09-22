@@ -1,6 +1,6 @@
 import unittest
 
-from gep.formulas.regulating import calculate_carbon_from_npp
+from gep.formulas.regulating import calculate_carbon_from_npp, calculate_oxygen_from_carbon
 from gep.formulas.registry import calculate_indicator
 
 
@@ -43,6 +43,37 @@ class RegulatingFormulaTests(unittest.TestCase):
 
         self.assertTrue(result.calculated)
         self.assertNotIn("method_implementation_pending", result.blocking_fields)
+
+    def test_r7_uses_only_a_compatible_co2_carbon_rate_and_oxygen_price(self):
+        result = calculate_oxygen_from_carbon({
+            "carbon_sequestration_rate": {"value": 1.3196333333333332, "unit": "tCO2/a"},
+            "oxygen_price": {"value": 80, "unit": "元/tO2"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertAlmostEqual(result.physical_value, 0.9597333333333332)
+        self.assertEqual(result.physical_unit, "tO2/a")
+        self.assertAlmostEqual(result.value_yuan, 76.77866666666667)
+        self.assertEqual(result.standard_clause, "A.55--A.56")
+
+    def test_r7_blocks_an_incompatible_carbon_unit_without_creating_a_value(self):
+        result = calculate_oxygen_from_carbon({
+            "carbon_sequestration_rate": {"value": 1, "unit": "tC/a"},
+            "oxygen_price": {"value": 80, "unit": "元/tO2"},
+        })
+
+        self.assertFalse(result.calculated)
+        self.assertIsNone(result.value_yuan)
+        self.assertEqual(result.blocking_fields, ("carbon_sequestration_rate",))
+
+    def test_registry_dispatches_r7_to_the_compatible_carbon_path(self):
+        result = calculate_indicator("R7", {
+            "carbon_sequestration_rate": {"value": 1.3196333333333332, "unit": "tCO2/a"},
+            "oxygen_price": {"value": 80, "unit": "元/tO2"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertAlmostEqual(result.value_yuan, 76.77866666666667)
 
 
 if __name__ == "__main__":
