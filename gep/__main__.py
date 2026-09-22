@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from . import catalog, workflow, release, fetch
+from .server import serve
 
 
 def main():
@@ -18,8 +19,15 @@ def main():
     s = sub.add_parser('seal'); s.add_argument('folder'); s.add_argument('--id', required=True)
     s = sub.add_parser('verify-release'); s.add_argument('folder')
     s = sub.add_parser('upload'); s.add_argument('folder'); s.add_argument('--repo', default='WeijieWu/haidian_GEP')
+    s = sub.add_parser('serve', help='run the local task API and Web canvas')
+    s.add_argument('--database', required=True)
+    s.add_argument('--host', default='127.0.0.1')
+    s.add_argument('--port', type=int, default=8000)
     args = p.parse_args()
     try:
+        if args.command == 'serve':
+            serve(args.host, args.port, args.database)
+            return
         if args.command == 'check': result = catalog.check(args.csv)
         elif args.command == 'build':
             result = catalog.build(args.csv); workflow.save(result, args.out)
