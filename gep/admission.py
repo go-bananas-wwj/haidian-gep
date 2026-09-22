@@ -21,7 +21,7 @@ APPLICABILITY_STATUSES = {"applicable", "not_applicable", "verified_zero"}
 ALLOWED_UNITS = {
     "t/a", "m3/a", "元/a", "万元/a", "人次/a", "hm2", "m2", "kWh/a",
     "person-visits/a", "person-hours/a", "room-nights/a", "h/visit", "元/h",
-    "元/visit", "元/room-night", "元/(m2*a)", "元/m3", "元/kWh", "fraction", "metadata", "choice",
+    "元/visit", "元/room-night", "元/(m2*a)", "元/m3", "元/kWh", "元/t", "fraction", "metadata", "choice",
 }
 STRUCTURED_FIELD_UNITS = {
     "origin": "metadata",

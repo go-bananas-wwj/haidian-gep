@@ -92,3 +92,27 @@ def calculate_water_balance(inputs: Mapping[str, Any]) -> MaterialResult:
         True, volume_m3, "m3/a", None, value_yuan, value_yuan / 10_000,
         "A.4--A.6", "requires_human_review" if volume_m3 < 0 else "calculated", (),
     )
+
+
+def calculate_crop_pollination(inputs: Mapping[str, Any]) -> MaterialResult:
+    """Calculate R12 only after P1/R12 chooses this crop's value to be booked under R12."""
+    quantity = _measurement(inputs, "crop_quantity", "t/a")
+    dependence = _measurement(inputs, "pollination_dependence", "fraction")
+    price = _measurement(inputs, "crop_price", "元/t")
+    choice = inputs.get("deduplication_choice")
+    invalid = [
+        field for field, value in (("crop_quantity", quantity), ("pollination_dependence", dependence), ("crop_price", price))
+        if value is None or value < 0
+    ]
+    if dependence is not None and dependence > 1:
+        invalid.append("pollination_dependence")
+    if not isinstance(choice, Mapping) or choice.get("unit") != "choice" or choice.get("value") != "exclusive_to_r12":
+        invalid.append("deduplication_choice")
+    if invalid:
+        return MaterialResult(False, None, None, None, None, None, "A.70--A.71", "blocked", tuple(sorted(invalid)))
+    pollinated_quantity = quantity * dependence
+    value_yuan = pollinated_quantity * price
+    return MaterialResult(
+        True, pollinated_quantity, "t/a", None, value_yuan, value_yuan / 10_000,
+        "A.70--A.71", "calculated", (),
+    )

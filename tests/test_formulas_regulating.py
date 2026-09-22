@@ -1,6 +1,11 @@
 import unittest
 
-from gep.formulas.regulating import calculate_carbon_from_npp, calculate_oxygen_from_carbon, calculate_water_balance
+from gep.formulas.regulating import (
+    calculate_carbon_from_npp,
+    calculate_crop_pollination,
+    calculate_oxygen_from_carbon,
+    calculate_water_balance,
+)
 from gep.formulas.registry import calculate_indicator
 
 
@@ -114,6 +119,37 @@ class RegulatingFormulaTests(unittest.TestCase):
 
         self.assertTrue(result.calculated)
         self.assertEqual(result.value_yuan, 5000)
+
+    def test_r12_requires_an_explicit_p1_exclusion_choice_before_valuing_pollination(self):
+        inputs = {
+            "crop_quantity": {"value": 100, "unit": "t/a"},
+            "pollination_dependence": {"value": 0.4, "unit": "fraction"},
+            "crop_price": {"value": 2_000, "unit": "元/t"},
+            "deduplication_choice": {"value": "exclusive_to_r12", "unit": "choice"},
+        }
+
+        result = calculate_crop_pollination(inputs)
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.physical_value, 40)
+        self.assertEqual(result.physical_unit, "t/a")
+        self.assertEqual(result.value_yuan, 80_000)
+        self.assertEqual(result.standard_clause, "A.70--A.71")
+
+        unresolved = calculate_crop_pollination({**inputs, "deduplication_choice": {"value": "unresolved", "unit": "choice"}})
+        self.assertFalse(unresolved.calculated)
+        self.assertEqual(unresolved.blocking_fields, ("deduplication_choice",))
+
+    def test_registry_dispatches_r12_to_the_pollination_method(self):
+        result = calculate_indicator("R12", {
+            "crop_quantity": {"value": 1, "unit": "t/a"},
+            "pollination_dependence": {"value": 1, "unit": "fraction"},
+            "crop_price": {"value": 1, "unit": "元/t"},
+            "deduplication_choice": {"value": "exclusive_to_r12", "unit": "choice"},
+        })
+
+        self.assertTrue(result.calculated)
+        self.assertEqual(result.value_yuan, 1)
 
 
 if __name__ == "__main__":
