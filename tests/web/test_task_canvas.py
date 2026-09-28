@@ -125,6 +125,12 @@ class TaskCanvasContractTests(unittest.TestCase):
         for summary in ("待审核", "待人工介入", "补充失败", "处理中"):
             self.assertIn(summary, app)
 
+    def test_restoring_a_historical_task_heals_its_automatic_queue(self):
+        """Break caught: tasks created before auto-scheduling could remain forever at awaiting-agent."""
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("await taskApi.autoSupplement", app)
+
 
 if __name__ == "__main__":
     unittest.main()

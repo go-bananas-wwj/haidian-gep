@@ -34,7 +34,8 @@ class DifyWorkflow:
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str] | None = None):
-        environment = environment or os.environ
+        if environment is None:
+            environment = os.environ
         base_url = environment.get("DIFY_API_BASE_URL", "").strip()
         api_key = environment.get("DIFY_API_KEY", "").strip()
         if not base_url or not api_key:

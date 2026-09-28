@@ -64,7 +64,8 @@ class EvidenceAwareWorkflow:
 def workflow_from_environment(
     environment: Mapping[str, str] | None = None,
 ) -> SupplementWorkflow | None:
-    environment = environment or os.environ
+    if environment is None:
+        environment = os.environ
     provider = environment.get("SUPPLEMENT_PROVIDER", "").strip().lower()
     if not provider:
         if environment.get("DEEPSEEK_API_KEY", "").strip():

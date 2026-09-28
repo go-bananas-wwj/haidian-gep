@@ -36,7 +36,8 @@ class DeepSeekWorkflow:
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str] | None = None):
-        environment = environment or os.environ
+        if environment is None:
+            environment = os.environ
         api_key = environment.get("DEEPSEEK_API_KEY", "").strip()
         if not api_key:
             return None

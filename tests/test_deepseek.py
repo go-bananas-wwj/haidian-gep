@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -107,6 +108,15 @@ class DeepSeekWorkflowTests(unittest.TestCase):
         self.assertIsNone(workflow_from_environment({"SUPPLEMENT_PROVIDER": "none"}))
         with self.assertRaises(ValueError):
             workflow_from_environment({"SUPPLEMENT_PROVIDER": "unknown"})
+
+    def test_explicit_empty_environment_does_not_inherit_process_credentials(self):
+        """Break caught: a caller requesting no provider could accidentally inherit a real process key."""
+        from gep.deepseek import DeepSeekWorkflow
+        from gep.supplement import workflow_from_environment
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "process-secret", "SUPPLEMENT_PROVIDER": "deepseek"}, clear=True):
+            self.assertIsNone(DeepSeekWorkflow.from_environment({}))
+            self.assertIsNone(workflow_from_environment({}))
 
 
 if __name__ == "__main__":

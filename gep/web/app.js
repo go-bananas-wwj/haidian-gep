@@ -64,9 +64,11 @@ async function pollEvents() {
 }
 function startPolling() { clearInterval(state.eventTimer); state.eventTimer = setInterval(pollEvents, 5000); pollEvents(); }
 async function openTask(task, { playInitial = false } = {}) {
-  closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null; await reload();
+  closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null;
+  let schedulingError = null; try { await taskApi.autoSupplement(task.task_id); } catch (error) { schedulingError = error; }
+  await reload();
   const { events } = await taskApi.events(state.task.task_id, 0); state.lastEvent = events.at(-1)?.sequence || 0; renderEvents(events, { animate:playInitial });
-  startPolling(); switchPage("prepare"); notice(`${playInitial ? "已创建" : "已恢复"}任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
+  startPolling(); switchPage("prepare"); notice(schedulingError ? `已恢复任务，但自动补充续排失败：${schedulingError.message}` : `${playInitial ? "已创建" : "已恢复"}任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
 }
 
 function drawerOpen() { return !$("#drawer-overlay").hidden; }
