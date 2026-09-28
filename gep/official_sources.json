@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "allowed_domains": [
+    "yllhj.beijing.gov.cn",
+    "swj.beijing.gov.cn",
+    "sthjj.beijing.gov.cn",
+    "zyk.bjhd.gov.cn"
+  ],
+  "sources": [
+    {
+      "source_id": "beijing_greening_resources_2024",
+      "title": "2024年城市绿化资源情况",
+      "publisher": "北京市园林绿化局",
+      "url": "https://yllhj.beijing.gov.cn/zwgk/tjxx/202506/P020250630562013758005.pdf",
+      "region_code": "110108",
+      "year": 2024,
+      "license_or_access": "public_official",
+      "facts": [
+        {"node_key": "R1.ecosystem_area", "metric": "海淀区绿地面积", "value": 14069.69, "unit": "hm2", "locator": "指标二：绿地面积，海淀区列", "risk_tier": "B", "risk_reason": "绿地面积仅是水源涵养生态系统面积的代理变量"},
+        {"node_key": "R2.area", "metric": "海淀区绿地面积", "value": 14069.69, "unit": "hm2", "locator": "指标二：绿地面积，海淀区列", "risk_tier": "B", "risk_reason": "绿地面积不等于全部土壤保持适用面积"},
+        {"node_key": "R5.ecosystem_area", "metric": "海淀区绿地面积", "value": 14069.69, "unit": "hm2", "locator": "指标二：绿地面积，海淀区列", "risk_tier": "B", "risk_reason": "绿地面积不等于洪水调蓄全部生态系统面积"},
+        {"node_key": "R6.ecosystem_area", "metric": "海淀区绿地面积", "value": 14069.69, "unit": "hm2", "locator": "指标二：绿地面积，海淀区列", "risk_tier": "B", "risk_reason": "区级绿地总量需与碳核算地类及AEF空间分配复核"},
+        {"node_key": "R8.ecosystem_area", "metric": "海淀区绿地面积", "value": 14069.69, "unit": "hm2", "locator": "指标二：绿地面积，海淀区列", "risk_tier": "B", "risk_reason": "绿地面积需按植被类型和净化参数进一步拆分"}
+      ]
+    },
+    {
+      "source_id": "beijing_water_resources_bulletin_2024",
+      "title": "2024年北京市水资源公报",
+      "publisher": "北京市水务局",
+      "url": "https://swj.beijing.gov.cn/zwgk/szygb/202504/P020250428362976968562.pdf",
+      "region_code": "110108",
+      "year": 2024,
+      "license_or_access": "public_official",
+      "facts": [
+        {"node_key": "P5.local_used_water", "metric": "海淀区生产生活用水量（不含损失）", "value": 27997.4, "unit": "10^4m3/a", "locator": "表3-1：2024年北京市生产生活用水量表，海淀区行", "risk_tier": "B", "risk_reason": "生产生活用水量不等于本地生态供水量，且与年鉴总用水量存在口径差异"}
+      ]
+    },
+    {
+      "source_id": "beijing_park_catalog_2024",
+      "title": "北京市公园名录（2024年度）",
+      "publisher": "北京市园林绿化局",
+      "url": "https://yllhj.beijing.gov.cn/zwgk/2024nzcwj/2024nqtwj/202406/P020240627706391756634.pdf",
+      "region_code": "110108",
+      "year": 2024,
+      "license_or_access": "public_official",
+      "facts": []
+    },
+    {
+      "source_id": "beijing_environment_report_2024",
+      "title": "2024年北京市生态环境状况公报",
+      "publisher": "北京市生态环境局",
+      "url": "https://sthjj.beijing.gov.cn/bjhrb/resource/cms/article/1718882/743615203/2025050910005582061.pdf",
+      "region_code": "110108",
+      "year": 2024,
+      "license_or_access": "public_official",
+      "facts": []
+    }
+  ]
+}

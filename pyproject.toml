@@ -19,4 +19,4 @@ haidian-gep = "gep.__main__:main"
 packages = ["gep", "gep.geo", "gep.formulas"]
 
 [tool.setuptools.package-data]
-gep = ["web/*.html", "web/*.css", "web/*.js"]
+gep = ["*.json", "web/*.html", "web/*.css", "web/*.js"]
