@@ -104,6 +104,15 @@ class SmartDataObservationBuilderTests(unittest.TestCase):
         self.assertEqual(by_metric["elevation_mean"].uncertainty["unique_pixel_count"], 14)
         self.assertEqual(by_metric["slope_mean"].unit, "degree")
 
+    def test_geographic_dem_is_reprojected_before_slope_gradient(self):
+        values=np.tile(np.arange(10,dtype="float32"),(10,1))
+        dem=self.write_raster("geographic-dem.tif",values,transform=from_origin(116.2,40.0,.0001,.0001))
+        with rasterio.open(dem,"r+") as dataset: dataset.crs="EPSG:4326"
+        observations=build_terrain_observations([dem],asset_ids=["dem"],year=2024,region_code="110108")
+        slope=next(item for item in observations if item.metric=="slope_mean")
+        self.assertGreater(slope.value,0)
+        self.assertLess(slope.value,20)
+
     def test_cover_areas_sum_to_valid_mask_within_one_pixel(self):
         cover = self.write_raster("cover.tif", [[10, 10, 50], [10, 80, 0]], dtype="uint8", nodata=0)
 

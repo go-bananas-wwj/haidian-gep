@@ -146,21 +146,32 @@ def build_terrain_observations(
         raise RuntimeError("numpy and rasterio are required") from error
     sources = [rasterio.open(path) for path in paths]
     try:
+        source_crs=sources[0].crs
         mosaic, transform = merge(sources, method="first", nodata=np.nan, dtype="float64")
     finally:
         for source in sources: source.close()
-    values = mosaic[0]; valid = np.isfinite(values)
+    values = mosaic[0]
+    if source_crs and source_crs.is_geographic:
+        from rasterio.transform import array_bounds
+        from rasterio.warp import Resampling, calculate_default_transform, reproject
+        left,bottom,right,top=array_bounds(values.shape[0],values.shape[1],transform)
+        dst_transform,width,height=calculate_default_transform(source_crs,"EPSG:32650",values.shape[1],values.shape[0],left,bottom,right,top,resolution=30)
+        projected=np.full((height,width),np.nan,dtype="float64")
+        reproject(source=values,destination=projected,src_transform=transform,src_crs=source_crs,
+                  dst_transform=dst_transform,dst_crs="EPSG:32650",src_nodata=np.nan,dst_nodata=np.nan,resampling=Resampling.bilinear)
+        values=projected; transform=dst_transform
+    valid = np.isfinite(values)
     if not valid.any(): raise ValueError("no_finite_raster_values:dem")
     filled = np.where(valid, values, np.nanmean(values[valid]))
     y_gradient, x_gradient = np.gradient(filled, abs(transform.e), abs(transform.a))
     slope = np.degrees(np.arctan(np.sqrt(x_gradient ** 2 + y_gradient ** 2)))
     uncertainty = {"unique_pixel_count": int(valid.sum()), "overlap_rule": "first_valid_pixel"}
     return [
-        _observation(observation_id="dem-2024-elevation-mean", metric="elevation_mean",
+        _observation(observation_id="dem-2024-elevation-mean-v2", metric="elevation_mean",
                      value=float(values[valid].mean()), unit="m", region_code=region_code, year=year,
                      spatial_grain="deduplicated_mosaic", method_id="dem.mosaic_mean", asset_ids=ids,
                      confidence=0.85, uncertainty=uncertainty, evidence_class="public_calculation"),
-        _observation(observation_id="dem-2024-slope-mean", metric="slope_mean",
+        _observation(observation_id="dem-2024-slope-mean-v2", metric="slope_mean",
                      value=float(slope[valid].mean()), unit="degree", region_code=region_code, year=year,
                      spatial_grain="deduplicated_mosaic", method_id="dem.gradient_slope", asset_ids=ids,
                      confidence=0.80, uncertainty=uncertainty, evidence_class="public_calculation"),
