@@ -1,6 +1,7 @@
 import { taskApi } from "./api.js";
 import { GepGraph, nodeState } from "./graph.js";
 import { renderMap } from "./map.js";
+import { nextActionFor } from "./guide.js";
 
 const $ = selector => document.querySelector(selector);
 const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, batchPreview:null, individualReviewMode:false, appendix:null };
@@ -35,6 +36,32 @@ function updateHeader(graph) {
   $("#graph-summary").textContent = `已建立 3 类、22 项指标；${active} 项处理中 · ${auto} 项自动采用 · ${review} 项建议复核 · ${gap} 项等待数据 · ${expert} 项专家介入 · ${failed} 项执行失败`;
   $("#agent-title").textContent = active ? `智能体处理中 · ${active} 项` : "本轮智能体处理已停在审核闸门";
   $("#agent-text").textContent = `${auto} 项已自动采用，${review} 项建议复核，${gap} 项已完成检索并等待数据，${expert} 项需专家判断。`;
+  updateNextAction({ active, auto, review, gap, expert, failed });
+}
+function firstNodeFor(kind) {
+  const matches = kind === "exceptions"
+    ? node => ["agent_failed", "manual_required"].includes(node.acquisition_status)
+    : node => node.acquisition_status === "research_complete";
+  return state.nodes.find(node => node.kind !== "indicator" && matches(node)) || state.nodes.find(matches);
+}
+function openGuidedNode(kind) {
+  const node = firstNodeFor(kind); if (!node) return;
+  const indicator = node.kind === "indicator" ? node : state.nodes.find(item => item.node_key === node.parent_key);
+  if (node.kind === "indicator") openIndicatorDrawer(node, null, $("#next-action-button"));
+  else openEvidenceDrawer(node, indicator, $("#next-action-button"));
+}
+function updateNextAction(summary) {
+  const action = nextActionFor(summary); const button = $("#next-action-button");
+  $("#next-action-title").textContent = action.title; $("#next-action-copy").textContent = action.copy;
+  button.textContent = action.button; button.disabled = action.disabled; button.dataset.action = action.kind;
+  button.onclick = () => {
+    if (action.kind === "batch") openBatchReview();
+    else if (action.kind === "scheme") switchPage("scheme");
+    else if (["exceptions", "gaps"].includes(action.kind)) openGuidedNode(action.kind);
+  };
+  for (const [index, step] of [...$("#guided-steps").children].entries()) {
+    step.classList.toggle("done", index + 1 < action.step); step.classList.toggle("current", index + 1 === action.step);
+  }
 }
 function eventText(event) {
   const labels = { "task.created":"创建任务图", "graph.initialized":"核算图已建立", "node.revised":"人工修正数据", "node.approved":"审核通过", "node.returned":"退回重查", "supplement.auto_enqueued":"全量研究已排队", "supplement.queued":"智能体排队中", "supplement.running":"智能体研究中", "candidate.auto_verified":"高可信候选已自动采用", "supplement.candidate_persisted":"候选已生成·建议复核", "research.completed":"自动检索完成·等待数据", "aef.inspected":"AEF 空间资产已检查", "supplement.manual_required":"需要专家介入", "batch_review.completed":"整批确认完成", "supplement.failed":"执行失败", "supplement.stale":"过期结果未采用", "supplement.blocked":"智能体补充受阻" };
@@ -67,10 +94,11 @@ async function pollEvents() {
 function startPolling() { clearInterval(state.eventTimer); state.eventTimer = setInterval(pollEvents, 5000); pollEvents(); }
 async function openTask(task, { playInitial = false } = {}) {
   closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null; state.individualReviewMode = false;
+  switchPage("prepare");
   let schedulingError = null; try { await taskApi.autoSupplement(task.task_id); } catch (error) { schedulingError = error; }
   await reload();
   const { events } = await taskApi.events(state.task.task_id, 0); state.lastEvent = events.at(-1)?.sequence || 0; renderEvents(events, { animate:playInitial });
-  startPolling(); switchPage("prepare"); notice(schedulingError ? `已恢复任务，但自动补充续排失败：${schedulingError.message}` : `${playInitial ? "已创建" : "已恢复"}任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
+  startPolling(); notice(schedulingError ? `已恢复任务，但自动补充续排失败：${schedulingError.message}` : `${playInitial ? "已创建" : "已恢复"}任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
 }
 
 function drawerOpen() { return !$("#drawer-overlay").hidden; }

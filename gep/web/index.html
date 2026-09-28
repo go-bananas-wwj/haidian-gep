@@ -24,6 +24,11 @@
 
     <section class="page" data-page-panel="centre">
       <div class="section-head"><div><p class="eyebrow">任务中心</p><h1>新建海淀区年度 GEP 核算任务</h1><p>固定年度、边界、标准和数据版本，随后由智能体建立可审核的数据图。</p></div></div>
+      <ol id="first-use-guide" class="first-use-guide" aria-label="第一次使用指引">
+        <li><b>1</b><span><strong>创建或恢复任务</strong><small>只需确认年度和数据版本</small></span></li>
+        <li><b>2</b><span><strong>等待智能体准备</strong><small>系统自动完成检索、提取与校验</small></span></li>
+        <li><b>3</b><span><strong>按“下一步”处理</strong><small>人工只看异常和最终确认</small></span></li>
+      </ol>
       <form id="task-form" class="form-card">
         <label>核算区域<input id="region" value="海淀区（110108）" readonly></label><label>核算年度<input id="year" value="2024 年（366 天）" readonly></label>
         <label>边界版本<input id="boundary" value="pending-confirmation"></label><label>数据版本<input id="data-version" value="reference-2024-v0.1"></label>
@@ -35,9 +40,19 @@
     </section>
 
     <section class="page" data-page-panel="prepare" hidden>
-      <div class="section-head"><div><p class="eyebrow">数据准备</p><h1>智能体自动研究，人工只处理异常与关键判断</h1><p>系统自动检索本地和官方来源、检查 AEF 空间资产并按证据风险分流；动画只回放已持久化事件。</p></div><div class="canvas-tools"><button id="zoom-out">−</button><span id="zoom-value">100%</span><button id="zoom-in">+</button><button id="collapse-all">折叠</button><button id="expand-all">展开</button></div></div>
+      <div class="section-head"><div><p class="eyebrow">数据准备</p><h1>智能体自动研究，人工只处理异常与关键判断</h1><p>流线持续展示从年度核算到各科目的依赖方向；蓝色加速表示刚刚完成的真实工作事件。</p></div><div class="canvas-tools"><button id="zoom-out">−</button><span id="zoom-value">100%</span><button id="zoom-in">+</button><button id="collapse-all">折叠</button><button id="expand-all">展开</button></div></div>
       <div class="prepare-layout"><div class="canvas-card"><div class="canvas-caption"><span class="live-dot"></span><span id="graph-summary">等待任务图</span><span class="muted">点击农产品、林产品或任一指标查看其数据支路</span></div><div id="graph-canvas" class="canvas" aria-live="polite"></div></div>
-        <aside class="right-rail"><div class="rail-card"><p class="eyebrow">自动研究</p><h2 id="agent-title">智能体准备中</h2><p id="agent-text">创建任务后，智能体会自动检索、提取、校验并分级。</p></div><div class="rail-card"><p class="eyebrow">审核闸门</p><div id="gate-summary" class="gate-summary">尚未加载</div><button id="batch-review" class="primary wide">整批确认</button><button id="go-scheme" class="wide rail-secondary">查看核算方案</button></div><div class="rail-card event-card"><p class="eyebrow">已持久化事件</p><ol id="event-list" class="event-list"><li>暂无事件</li></ol></div></aside></div>
+        <aside class="right-rail">
+          <div id="next-action-card" class="next-action-card">
+            <p class="eyebrow">你现在只需要做这一步</p>
+            <ol id="guided-steps" class="guided-steps" aria-label="数据准备进度"><li>自动研究</li><li>处理异常</li><li>整批确认</li><li>进入方案</li></ol>
+            <h2 id="next-action-title">等待任务加载</h2><p id="next-action-copy">系统会根据当前进度给出唯一的下一步。</p>
+            <button id="next-action-button" class="primary wide" disabled>正在加载</button>
+          </div>
+          <div class="rail-card"><p class="eyebrow">自动研究</p><h2 id="agent-title">智能体准备中</h2><p id="agent-text">创建任务后，智能体会自动检索、提取、校验并分级。</p></div>
+          <div class="rail-card gate-card"><p class="eyebrow">审核闸门</p><div id="gate-summary" class="gate-summary">尚未加载</div><button id="batch-review" hidden>整批确认</button><button id="go-scheme" hidden>查看核算方案</button></div>
+          <details class="rail-card event-card"><summary>查看最近事件</summary><ol id="event-list" class="event-list"><li>暂无事件</li></ol></details>
+        </aside></div>
     </section>
 
     <section class="page" data-page-panel="scheme" hidden><div class="section-head"><div><p class="eyebrow">核算方案</p><h1>冻结前逐项确认</h1><p>图版本、数据版本、边界和公式版本共同构成可复算快照。</p></div><button id="readiness">刷新核算闸门</button></div><div id="readiness-card" class="readiness-card"><h2>尚未加载任务</h2></div><div class="action-row"><button id="freeze" class="primary" disabled>生成核算快照</button><span class="muted">快照仅在全部适用输入已审核时生成。</span></div></section>

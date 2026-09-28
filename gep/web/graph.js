@@ -58,7 +58,7 @@ export class GepGraph {
   constructor(container, { onNode, onDetail } = {}) {
     this.container = container; this.onNode = onNode; this.onDetail = onDetail;
     this.zoom = 1; this.collapsed = {}; this.nodes = []; this.taskId = null; this.edgeLayer = null; this.stage = null;
-    this.resizeTimer = null;
+    this.resizeTimer = null; this.edgeTimers = new Map();
     window.addEventListener("resize", () => { clearTimeout(this.resizeTimer); this.resizeTimer = setTimeout(() => this.layoutEdges(), 100); });
   }
   storageKey() { return this.taskId ? `haidian-gep:view-layout:${this.taskId}` : ""; }
@@ -113,6 +113,7 @@ export class GepGraph {
     const addPath = (id, start, end) => {
       const path = document.createElementNS(SVG_NS, "path"); const middle = start.y + Math.max(18, (end.y - start.y) * .45);
       path.classList.add("edge-path"); path.dataset.edge = id;
+      path.style.setProperty("--flow-delay", `${-(paths.length * .11)}s`);
       path.setAttribute("d", `M ${start.x} ${start.y} C ${start.x} ${middle}, ${end.x} ${middle}, ${end.x} ${end.y}`); paths.push(path);
     };
     for (const [category] of CATEGORIES) {
@@ -140,11 +141,11 @@ export class GepGraph {
       const element = this.container.querySelector(`[data-node="${indicatorKey}"]`);
       if (element) { element.classList.remove("node-flow"); requestAnimationFrame(() => element.classList.add("node-flow")); }
     }
-    let delay = 0;
     for (const edgeId of edgeIds) {
       const edge = this.edgeLayer?.querySelector(`[data-edge="${edgeId}"]`); if (!edge) continue;
-      setTimeout(() => { edge.classList.remove("flowing"); void edge.getBoundingClientRect(); edge.classList.add("flowing"); }, delay);
-      delay += 70;
+      edge.classList.add("flowing");
+      clearTimeout(this.edgeTimers.get(edgeId));
+      this.edgeTimers.set(edgeId, setTimeout(() => { edge.classList.remove("flowing"); this.edgeTimers.delete(edgeId); }, 1500));
     }
   }
   // 产品详情以可折叠的鱼骨式树呈现：对象目录 → 具体产品 → 可审核字段。

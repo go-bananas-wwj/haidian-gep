@@ -17,7 +17,7 @@ class TaskCanvasContractTests(unittest.TestCase):
         index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("styles.css", index)
         self.assertIn("app.js", index)
-        for asset in ("api.js", "graph.js", "map.js"):
+        for asset in ("api.js", "graph.js", "guide.js", "map.js"):
             self.assertTrue((WEB_ROOT / asset).is_file())
 
         with tempfile.TemporaryDirectory() as directory:
@@ -121,7 +121,7 @@ class TaskCanvasContractTests(unittest.TestCase):
             self.assertIn(event_type, graph)
         self.assertIn("if (!edge) continue", graph)
         self.assertIn("stroke-dashoffset", styles)
-        self.assertIn("@keyframes edge-flow", styles)
+        self.assertIn("@keyframes edge-stream", styles)
         self.assertIn("prefers-reduced-motion", styles)
 
     def test_all_agent_terminal_and_progress_states_are_distinct(self):

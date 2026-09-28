@@ -71,7 +71,7 @@ class DemoApi:
         try:
             if method == "GET" and path == "/":
                 return self._html_response(start_response, (Path(__file__).parent / "web" / "index.html").read_bytes())
-            if method == "GET" and len(parts) == 1 and parts[0] in {"styles.css", "api.js", "graph.js", "map.js", "app.js"}:
+            if method == "GET" and len(parts) == 1 and parts[0] in {"styles.css", "api.js", "graph.js", "guide.js", "map.js", "app.js"}:
                 return self._asset_response(start_response, Path(__file__).parent / "web" / parts[0])
             if method == "GET" and path == "/health":
                 return self._response(start_response, 200, {"status": "ok"})
