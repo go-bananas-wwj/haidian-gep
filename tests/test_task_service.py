@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -239,6 +240,87 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(current["review_status"], "unsubmitted")
         self.assertEqual(current["evidence"]["current"]["reason_code"], "source_missing")
         self.assertIn("supplement.manual_required", [event["type"] for event in events])
+
+    def test_workflow_persists_research_complete_without_manual_action(self):
+        """Break caught: a completed source search with no fact could still flood the manual queue."""
+        class Workflow:
+            def run(self, _work_order):
+                return {
+                    "outcome": "research_complete", "risk_tier": "GAP",
+                    "explanation": "已检查本地目录和官方来源，尚无该字段。",
+                    "searched_tools": ["local_catalog", "official_registry"],
+                    "next_action": "等待主管部门数据或后续自动重试",
+                }
+
+        self.store.close()
+        self.store = GepStore(Path(self.directory.name) / "tasks.sqlite3", supplement_workflow=Workflow())
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.store.request_supplement(task["task_id"], node["node_id"], "research-gap-1")
+
+        job = self.store.process_next_supplement()
+        current = self.store.node(task["task_id"], "P1.maize.producer_price")
+
+        self.assertEqual(job["status"], "research_complete")
+        self.assertEqual(current["acquisition_status"], "research_complete")
+        self.assertEqual(current["review_status"], "unsubmitted")
+        self.assertEqual(current["evidence"]["current"]["risk_tier"], "GAP")
+        self.assertIn("research.completed", [event["type"] for event in self.store.events(task["task_id"])])
+
+    def test_risk_a_candidate_is_auto_verified_while_b_remains_pending_review(self):
+        """Break caught: every candidate could still demand the same per-node manual review."""
+        class Workflow:
+            def __init__(self):
+                self.tier = "A"
+
+            def run(self, _work_order):
+                return {
+                    "outcome": "candidate", "risk_tier": self.tier, "auto_adopt": self.tier == "A",
+                    "value": 2100, "unit": "yuan/t", "explanation": "官方来源已校验。",
+                    "evidence": {"source_id": "official", "source_type": "official_government", "locator": "row=1",
+                                 "source_sha256": "a" * 64, "license_or_access": "public", "tool_run_id": "research-1",
+                                 "extracted_fragment": "2100"},
+                }
+
+        workflow = Workflow()
+        self.store.close()
+        self.store = GepStore(Path(self.directory.name) / "tasks.sqlite3", supplement_workflow=workflow)
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        first = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.store.request_supplement(task["task_id"], first["node_id"], "risk-a")
+        self.store.process_next_supplement()
+        auto = self.store.node(task["task_id"], "P1.maize.producer_price")
+
+        workflow.tier = "B"
+        second = self.store.node(task["task_id"], "P1.maize.intermediate_cost")
+        self.store.request_supplement(task["task_id"], second["node_id"], "risk-b")
+        self.store.process_next_supplement()
+        review = self.store.node(task["task_id"], "P1.maize.intermediate_cost")
+
+        self.assertEqual(auto["review_status"], "auto_verified")
+        self.assertEqual(auto["evidence"]["current"]["risk_tier"], "A")
+        self.assertEqual(review["review_status"], "pending_review")
+        self.assertEqual(review["evidence"]["current"]["risk_tier"], "B")
+
+    def test_research_v2_reschedules_only_legacy_source_missing_manual_nodes(self):
+        """Break caught: old blanket manual states could remain stuck or overwrite genuine expert decisions."""
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        source_missing = self.store.node(task["task_id"], "R1.precipitation")
+        expert = self.store.node(task["task_id"], "R1.surface_runoff")
+        for node, reason in ((source_missing, "source_missing"), (expert, "method_choice")):
+            self.store.connection.execute(
+                "UPDATE nodes SET acquisition_status='manual_required',evidence_json=?,version=2 WHERE node_id=?",
+                (json.dumps({"current": {"result_type": "manual_required", "reason_code": reason}}), node["node_id"]),
+            )
+        self.store.connection.commit()
+
+        result = self.store.enqueue_all_supplements(task["task_id"], scheduler_version="research-v2")
+        source_missing = self.store.node(task["task_id"], "R1.precipitation")
+        expert = self.store.node(task["task_id"], "R1.surface_runoff")
+
+        self.assertEqual(source_missing["acquisition_status"], "agent_queued")
+        self.assertEqual(expert["acquisition_status"], "manual_required")
+        self.assertGreater(result["queued_count"], 0)
 
     def test_workflow_failure_reason_does_not_persist_raw_provider_text(self):
         """Break caught: a provider exception could leak a response body into SQLite events."""

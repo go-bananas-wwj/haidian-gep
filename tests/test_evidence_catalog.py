@@ -119,8 +119,8 @@ class EvidenceAwareWorkflowTests(unittest.TestCase):
         self.assertEqual(result["explanation"], "请人工复核年鉴行。")
         self.assertEqual(result["evidence"]["source_id"], "yearbook")
 
-    def test_skips_provider_without_evidence(self):
-        """Break caught: the system could spend model calls or invent values with no admitted source."""
+    def test_skips_provider_without_evidence_and_records_research_gap(self):
+        """Break caught: the system could spend model calls or mislabel a completed search as manual work."""
         from gep.supplement import EvidenceAwareWorkflow
 
         class Catalog:
@@ -132,11 +132,11 @@ class EvidenceAwareWorkflowTests(unittest.TestCase):
                 raise AssertionError("provider must not be called")
 
         result = EvidenceAwareWorkflow(Provider(), Catalog()).run({"node_key": "R1.precipitation"})
-        self.assertEqual(result["outcome"], "manual_required")
-        self.assertEqual(result["reason_code"], "source_missing")
+        self.assertEqual(result["outcome"], "research_complete")
+        self.assertEqual(result["risk_tier"], "GAP")
 
-    def test_rejects_a_candidate_that_cites_unavailable_evidence(self):
-        """Break caught: a malicious model could cite a source not supplied to that work order."""
+    def test_model_cannot_create_a_candidate_from_an_incomplete_allowed_record(self):
+        """Break caught: a malicious model could create a value from evidence without an admitted fact."""
         from gep.supplement import EvidenceAwareWorkflow
 
         allowed = {"source_id": "allowed", "source_sha256": "a" * 64}
@@ -152,8 +152,8 @@ class EvidenceAwareWorkflowTests(unittest.TestCase):
                     "evidence": {"source_id": "unknown", "source_sha256": "b" * 64},
                 }
 
-        with self.assertRaises(ValueError):
-            EvidenceAwareWorkflow(Provider(), Catalog()).run({"node_key": "P1.maize.quantity"})
+        result = EvidenceAwareWorkflow(Provider(), Catalog()).run({"node_key": "P1.maize.quantity"})
+        self.assertEqual(result["outcome"], "research_complete")
 
 
 if __name__ == "__main__":

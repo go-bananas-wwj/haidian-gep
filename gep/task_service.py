@@ -577,8 +577,21 @@ class GepStore:
                 raise ValueError("manual intervention requires a reason code")
             return {
                 "outcome": outcome,
+                "risk_tier": "C",
                 "reason_code": reason_code.strip(),
                 "explanation": explanation.strip(),
+                "searched_tools": list(payload.get("searched_tools") or []),
+            }
+        if outcome == "research_complete":
+            searched_tools = payload.get("searched_tools")
+            if not isinstance(searched_tools, list) or not all(isinstance(item, str) and item for item in searched_tools):
+                raise ValueError("research completion requires searched tools")
+            return {
+                "outcome": outcome, "risk_tier": "GAP", "explanation": explanation.strip(),
+                "searched_tools": searched_tools,
+                "verification_failures": int(payload.get("verification_failures") or 0),
+                "aef_result": payload.get("aef_result"),
+                "next_action": str(payload.get("next_action") or "等待后续自动重试"),
             }
         if outcome == "applicability_candidate":
             if node_kind != "indicator":
@@ -590,6 +603,7 @@ class GepStore:
             GepStore._validated_workflow_evidence(evidence)
             return {
                 "outcome": outcome,
+                "risk_tier": str(payload.get("risk_tier") or "B"),
                 "applicability_status": applicability,
                 "explanation": explanation.strip(),
                 "evidence": evidence,
@@ -608,8 +622,13 @@ class GepStore:
         if not isinstance(unit, str) or not unit.strip():
             raise ValueError("workflow candidate requires a unit")
         evidence = GepStore._validated_workflow_evidence(evidence)
+        risk_tier = str(payload.get("risk_tier") or "B")
+        if risk_tier not in {"A", "B"}:
+            raise ValueError("workflow candidate risk tier must be A or B")
         return {
             "outcome": "candidate",
+            "risk_tier": risk_tier,
+            "auto_adopt": risk_tier == "A" and bool(payload.get("auto_adopt")),
             "value": value,
             "unit": unit.strip(),
             "explanation": explanation.strip(),
@@ -680,7 +699,7 @@ class GepStore:
             self._event(task_id, node_id, "supplement.queued", {"job_id": job_id})
         return {"job_id": job_id, "status": "queued", "reason": reason}
 
-    def enqueue_all_supplements(self, task_id: str, scheduler_version: str = "auto-v1") -> dict[str, Any]:
+    def enqueue_all_supplements(self, task_id: str, scheduler_version: str = "research-v2") -> dict[str, Any]:
         """Idempotently enqueue every unresolved indicator and input node."""
         if not scheduler_version.strip():
             raise ValueError("scheduler_version is required")
@@ -707,7 +726,7 @@ class GepStore:
             if node["review_status"] == "approved":
                 skip("approved")
                 continue
-            if node["review_status"] == "pending_review" or node["acquisition_status"] == "candidate_ready":
+            if node["review_status"] in {"pending_review", "auto_verified"} or node["acquisition_status"] == "candidate_ready":
                 skip("awaiting_review")
                 continue
             if node["value"] is not None:
@@ -717,8 +736,10 @@ class GepStore:
                 skip("active_job")
                 continue
             if node["acquisition_status"] == "manual_required":
-                skip("manual_required")
-                continue
+                current = node.get("evidence", {}).get("current", {})
+                if not (scheduler_version == "research-v2" and current.get("reason_code") == "source_missing"):
+                    skip("manual_required")
+                    continue
             if node["kind"] == "input":
                 parent = by_key.get(node["parent_key"])
                 if parent and parent["applicability_status"] in {"not_applicable", "verified_zero"}:
@@ -832,7 +853,9 @@ class GepStore:
         if candidate["outcome"] == "manual_required":
             manual_evidence = {
                 "reason_code": candidate["reason_code"],
+                "risk_tier": "C",
                 "explanation": candidate["explanation"],
+                "searched_tools": candidate.get("searched_tools", []),
                 "result_type": "manual_required",
                 "received_utc": _utc_now(),
             }
@@ -857,9 +880,40 @@ class GepStore:
                 return self._mark_supplement_stale(job_id, task_id, node_id, error)
             return {"job_id": job_id, "status": "manual_required", "reason": "human evidence or decision required"}
 
+        if candidate["outcome"] == "research_complete":
+            research_evidence = {
+                "risk_tier": "GAP", "explanation": candidate["explanation"],
+                "searched_tools": candidate["searched_tools"],
+                "verification_failures": candidate["verification_failures"],
+                "aef_result": candidate["aef_result"], "next_action": candidate["next_action"],
+                "result_type": "research_complete", "received_utc": _utc_now(),
+            }
+            combined_evidence = {"original": current_evidence, "current": research_evidence}
+            try:
+                with self.connection:
+                    self.connection.execute(
+                        "UPDATE supplement_jobs SET status='research_complete',reason='automatic research completed without an admissible value',updated_utc=? WHERE job_id=? AND status='running'",
+                        (_utc_now(), job_id),
+                    )
+                    updated = self.connection.execute(
+                        "UPDATE nodes SET evidence_json=?,acquisition_status='research_complete',review_status='unsubmitted',version=? WHERE node_id=? AND version=?",
+                        (json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
+                    )
+                    if updated.rowcount != 1:
+                        raise ConflictError("node version is stale")
+                    self._bump_graph_version(task_id)
+                    self._event(task_id, node_id, "research.completed", {
+                        "job_id": job_id, "version": next_version, "risk_tier": "GAP",
+                        "searched_tools": candidate["searched_tools"],
+                    })
+            except ConflictError as error:
+                return self._mark_supplement_stale(job_id, task_id, node_id, error)
+            return {"job_id": job_id, "status": "research_complete", "reason": "automatic research completed"}
+
         candidate_evidence = {
             **candidate["evidence"],
             "explanation": candidate["explanation"],
+            "risk_tier": candidate.get("risk_tier", "B"),
             "result_type": "agent_candidate",
             "received_utc": _utc_now(),
         }
@@ -877,20 +931,25 @@ class GepStore:
                          next_version, node_id, node["version"]),
                     )
                 else:
+                    review_status = "auto_verified" if candidate.get("auto_adopt") else "pending_review"
                     updated = self.connection.execute(
-                        "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,acquisition_status='candidate_ready',review_status='pending_review',version=? WHERE node_id=? AND version=?",
+                        "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,acquisition_status='candidate_ready',review_status=?,version=? WHERE node_id=? AND version=?",
                         (json.dumps(candidate["value"], ensure_ascii=False, allow_nan=False), candidate["unit"],
-                         json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
+                         json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), review_status, next_version, node_id, node["version"]),
                     )
                 if updated.rowcount != 1:
                     raise ConflictError("node version is stale")
                 self._bump_graph_version(task_id)
-                self._event(task_id, node_id, "supplement.candidate_persisted", {
+                event_type = "candidate.auto_verified" if candidate.get("auto_adopt") else "supplement.candidate_persisted"
+                self._event(task_id, node_id, event_type, {
                     "job_id": job_id, "version": next_version, "source_id": candidate["evidence"]["source_id"],
                     "source_sha256": candidate["evidence"]["source_sha256"], "tool_run_id": candidate["evidence"]["tool_run_id"],
+                    "risk_tier": candidate.get("risk_tier", "B"),
                 })
         except ConflictError as error:
             return self._mark_supplement_stale(job_id, task_id, node_id, error)
+        if candidate.get("auto_adopt"):
+            return {"job_id": job_id, "status": "completed_auto_verified", "reason": "candidate auto-verified; batch confirmation required"}
         return {"job_id": job_id, "status": "completed_pending_review", "reason": "candidate persisted; human review required"}
 
     def _mark_supplement_stale(
