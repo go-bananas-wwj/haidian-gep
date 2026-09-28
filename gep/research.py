@@ -127,7 +127,7 @@ class ResearchWorkflow:
                 "outcome": "candidate", "risk_tier": "B", "auto_adopt": False,
                 "value": chosen["value"], "unit": chosen["unit"], "explanation": explanation,
                 "evidence": self._evidence(chosen), "risk_reason": chosen.get("risk_reason", ""),
-                "searched_tools": searched_tools,
+                "searched_tools": searched_tools, "aef_result": aef_result,
             }
 
         return {

@@ -745,6 +745,9 @@ class GepStore:
             "outcome": "candidate",
             "risk_tier": risk_tier,
             "auto_adopt": risk_tier == "A" and bool(payload.get("auto_adopt")),
+            "risk_reason": str(payload.get("risk_reason") or ""),
+            "searched_tools": list(payload.get("searched_tools") or []),
+            "aef_result": payload.get("aef_result"),
             "value": value,
             "unit": unit.strip(),
             "explanation": explanation.strip(),
@@ -1039,6 +1042,9 @@ class GepStore:
             **candidate["evidence"],
             "explanation": candidate["explanation"],
             "risk_tier": candidate.get("risk_tier", "B"),
+            "risk_reason": candidate.get("risk_reason", ""),
+            "searched_tools": candidate.get("searched_tools", []),
+            "aef_result": candidate.get("aef_result"),
             "result_type": "agent_candidate",
             "received_utc": _utc_now(),
         }
@@ -1066,6 +1072,12 @@ class GepStore:
                     raise ConflictError("node version is stale")
                 self._bump_graph_version(task_id)
                 event_type = "candidate.auto_verified" if candidate.get("auto_adopt") else "supplement.candidate_persisted"
+                if isinstance(candidate.get("aef_result"), dict) and candidate["aef_result"].get("status") != "not_applicable":
+                    self._event(task_id, node_id, "aef.inspected", {
+                        "job_id": job_id, "status": candidate["aef_result"].get("status"),
+                        "missing_prerequisites": candidate["aef_result"].get("missing_prerequisites", []),
+                        "vrt_sha256": candidate["aef_result"].get("vrt_sha256"),
+                    })
                 self._event(task_id, node_id, event_type, {
                     "job_id": job_id, "version": next_version, "source_id": candidate["evidence"]["source_id"],
                     "source_sha256": candidate["evidence"]["source_sha256"], "tool_run_id": candidate["evidence"]["tool_run_id"],

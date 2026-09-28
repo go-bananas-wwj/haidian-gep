@@ -33,6 +33,11 @@ class Registry:
         return {**record, "online_status": "verified", "checked_utc": "2026-09-28T00:00:00+00:00"}
 
 
+class AefTool:
+    def inspect(self, _work_order):
+        return {"status": "research_gap", "missing_prerequisites": ["confirmed_boundary", "training_labels"]}
+
+
 def evidence(**overrides):
     value = {
         "source_id": "yearbook", "source_type": "observed", "source_sha256": "a" * 64,
@@ -66,7 +71,7 @@ class ResearchWorkflowTests(unittest.TestCase):
             metric="海淀区绿地面积", value=14069.69, unit="hm2", raw_status="official_fact",
             risk_tier="B", risk_reason="绿地面积是生态系统面积代理", url="https://yllhj.beijing.gov.cn/a.pdf",
         )
-        result = ResearchWorkflow(Provider(), Catalog([]), Registry([official])).run({
+        result = ResearchWorkflow(Provider(), Catalog([]), Registry([official]), AefTool()).run({
             "node_kind": "input", "node_key": "R6.ecosystem_area", "node_label": "ecosystem_area",
         })
 
@@ -76,6 +81,8 @@ class ResearchWorkflowTests(unittest.TestCase):
         self.assertEqual(result["evidence"]["online_status"], "verified")
         self.assertEqual(len(result["evidence"]["source_sha256"]), 64)
         self.assertEqual(result["evidence"]["source_hash_scope"], "registry_fact_record")
+        self.assertEqual(result["aef_result"]["status"], "research_gap")
+        self.assertIn("confirmed_boundary", result["aef_result"]["missing_prerequisites"])
 
     def test_no_evidence_after_tools_is_research_complete_not_manual(self):
         """Break caught: an exhausted automatic search could still be mislabeled as required human work."""
