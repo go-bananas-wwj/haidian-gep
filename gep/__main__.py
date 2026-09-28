@@ -5,6 +5,8 @@ from pathlib import Path
 from . import catalog, workflow, release, fetch
 from .server import serve
 from .worker import SupplementWorker
+from .smart_data.assets import scan_known_assets
+from .task_service import GepStore
 
 
 def main():
@@ -28,6 +30,10 @@ def main():
     s.add_argument('--database', required=True)
     s.add_argument('--once', action='store_true')
     s.add_argument('--poll-seconds', type=float, default=1.0)
+    s = sub.add_parser('smart-data-scan', help='register known data assets in the task database')
+    s.add_argument('--database', required=True)
+    s.add_argument('--data-root', required=True)
+    s.add_argument('--data-version', default='smart-data-2024-v1')
     args = p.parse_args()
     try:
         if args.command == 'serve':
@@ -40,6 +46,14 @@ def main():
             else:
                 worker.run_forever(args.poll_seconds)
                 return
+        elif args.command == 'smart-data-scan':
+            store = GepStore(args.database)
+            try:
+                assets = scan_known_assets(Path(args.data_root), args.data_version)
+                registered = [store.smart_data.register_asset(asset) for asset in assets]
+                result = {'registered_count': len(registered), 'asset_ids': [item['asset_id'] for item in registered]}
+            finally:
+                store.close()
         elif args.command == 'check': result = catalog.check(args.csv)
         elif args.command == 'build':
             result = catalog.build(args.csv); workflow.save(result, args.out)

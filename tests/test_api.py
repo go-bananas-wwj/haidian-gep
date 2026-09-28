@@ -49,12 +49,87 @@ class ApiTests(unittest.TestCase):
         encoded = json.dumps(body).encode() if body is not None else b""
         environ = {}
         setup_testing_defaults(environ)
-        environ.update({"REQUEST_METHOD": method, "PATH_INFO": path, "CONTENT_LENGTH": str(len(encoded)), "wsgi.input": io.BytesIO(encoded), "HTTP_X_GEP_ACTOR": actor})
+        path_info, _, query = path.partition("?")
+        environ.update({"REQUEST_METHOD": method, "PATH_INFO": path_info, "QUERY_STRING": query, "CONTENT_LENGTH": str(len(encoded)), "wsgi.input": io.BytesIO(encoded), "HTTP_X_GEP_ACTOR": actor})
         status, headers = [], []
         payload = b"".join(self.app(environ, lambda s, h: (status.append(s), headers.extend(h))))
         header_map = dict(headers)
         decoded = {"html": payload.decode("utf-8")} if header_map.get("Content-Type") == "text/html; charset=utf-8" else json.loads(payload)
         return int(status[0].split()[0]), decoded, header_map
+
+    def test_data_asset_scan_requires_identity_and_query_filters_are_exact(self):
+        derived = self.data_root / "derived"
+        derived.mkdir()
+        (derived / "nasa.csv").write_text("month,precipitation\n202401,1\n", encoding="utf-8")
+        catalog = self.data_root / "catalog"
+        catalog.mkdir()
+        (catalog / "climate_receipt.json").write_text(json.dumps({
+            "source": "https://power.larc.nasa.gov/api/temporal/monthly/point",
+            "derived_path": "data/derived/nasa.csv", "sha256": "a" * 64,
+            "valid_months": [f"2024{month:02d}" for month in range(1, 13)],
+            "limitation": "single point",
+        }), encoding="utf-8")
+
+        denied, _, _ = self.request("POST", "/data-assets:scan", {}, actor="")
+        scanned, payload, _ = self.request("POST", "/data-assets:scan", {})
+        status, listing, _ = self.request(
+            "GET", "/data-assets?asset_type=climate&year=2024&region_code=110108"
+        )
+        wrong_year, empty, _ = self.request("GET", "/data-assets?asset_type=climate&year=2025")
+
+        self.assertEqual(denied, 503)
+        self.assertEqual(scanned, 201)
+        self.assertEqual(payload["registered_count"], 1)
+        self.assertEqual(status, 200)
+        self.assertEqual([asset["asset_id"] for asset in listing["assets"]], ["nasa-power-monthly-point"])
+        self.assertEqual(wrong_year, 200)
+        self.assertEqual(empty["assets"], [])
+
+    def test_data_asset_api_redacts_a_local_path_outside_the_approved_root(self):
+        from gep.smart_data import AssetRecord
+
+        self.app.store.smart_data.register_asset(AssetRecord.from_dict({
+            "asset_id": "unsafe-path", "asset_version": "v1", "asset_type": "test",
+            "title": "unsafe", "publisher": "test", "source_url": "https://example.test/source",
+            "license_or_access": "test", "period_start": "2024-01-01", "period_end": "2024-12-31",
+            "region_code": "110108", "bbox": None, "crs": None, "local_path": "../outside.txt",
+            "sha256": "f" * 64, "quality_status": "available", "quality": {},
+        }))
+
+        status, asset, _ = self.request("GET", "/data-assets/unsafe-path")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(asset["asset_id"], "unsafe-path")
+        self.assertEqual(asset["local_path"], None)
+        self.assertTrue(asset["path_redacted"])
+
+    def test_derived_observation_api_requires_exact_metric_year_and_region(self):
+        from gep.smart_data import AssetRecord, ObservationRecord
+
+        self.app.store.smart_data.register_asset(AssetRecord.from_dict({
+            "asset_id": "climate-source", "asset_version": "v1", "asset_type": "climate",
+            "title": "climate", "publisher": "NASA", "source_url": "https://example.test/source",
+            "license_or_access": "public", "period_start": "2024-01-01", "period_end": "2024-12-31",
+            "region_code": "110108", "bbox": None, "crs": None, "local_path": None,
+            "sha256": "a" * 64, "quality_status": "proxy", "quality": {},
+        }))
+        self.app.store.smart_data.register_observation(ObservationRecord.from_dict({
+            "observation_id": "precip-2024", "metric": "precipitation", "value": 855.17,
+            "unit": "mm/a", "region_code": "110108", "year": 2024, "spatial_grain": "district_proxy",
+            "method_id": "monthly_sum", "method_version": "v1", "input_asset_ids": ["climate-source"],
+            "confidence": 0.65, "uncertainty": {}, "evidence_class": "model_estimate",
+        }))
+
+        status, found, _ = self.request(
+            "GET", "/derived-observations?metric=precipitation&year=2024&region_code=110108&unit=mm%2Fa"
+        )
+        _, wrong_region, _ = self.request(
+            "GET", "/derived-observations?metric=precipitation&year=2024&region_code=110105"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(found["observations"][0]["observation_id"], "precip-2024")
+        self.assertEqual(wrong_region["observations"], [])
 
     def approve_all_formula_versions(self, data_version):
         """Provide reviewed method/parameter records for a fully admitted test snapshot."""

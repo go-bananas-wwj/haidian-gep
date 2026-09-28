@@ -11,6 +11,8 @@ from urllib.parse import parse_qs
 from .data_packages import DataPackageCatalog
 from .dify import DifyWorkflow
 from .methods import method_cards
+from .smart_data import SmartDataConflictError
+from .smart_data.assets import scan_known_assets
 from .task_service import ConflictError, GepStore, SnapshotBlocked
 
 
@@ -20,7 +22,9 @@ class DemoApi:
             database_path, supplement_workflow=DifyWorkflow.from_environment(), auto_enqueue_on_create=True,
         )
         self.reviewer_header = reviewer_header or os.environ.get("GEP_TRUSTED_PROXY_USER_HEADER")
-        self.data_packages = DataPackageCatalog(data_root or os.environ.get("GEP_DATA_ROOT"))
+        selected_root = data_root or os.environ.get("GEP_DATA_ROOT")
+        self.data_root = Path(selected_root).resolve() if selected_root else None
+        self.data_packages = DataPackageCatalog(selected_root)
 
     def close(self) -> None:
         self.store.close()
@@ -58,6 +62,17 @@ class DemoApi:
         start_response("200 OK", [("Content-Type", content_type), ("Content-Length", str(len(data)))])
         return [data]
 
+    def _public_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
+        result = dict(asset); result["path_redacted"] = False
+        local_path = result.get("local_path")
+        if local_path and self.data_root is not None:
+            resolved = (self.data_root / local_path).resolve(strict=False)
+            if not resolved.is_relative_to(self.data_root):
+                result["local_path"] = None; result["path_redacted"] = True
+        elif local_path:
+            result["local_path"] = None; result["path_redacted"] = True
+        return result
+
     def __call__(self, environ: dict[str, Any], start_response: Callable):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "")
         # The production proxy keeps API requests under /api while the local
@@ -87,6 +102,35 @@ class DemoApi:
                 return self._response(start_response, 200, {"data_versions": self.data_packages.versions()})
             if method == "GET" and len(parts) == 2 and parts[0] == "data-versions":
                 return self._response(start_response, 200, self.data_packages.summary(parts[1]))
+            if method == "GET" and parts == ["data-assets"]:
+                query = parse_qs(environ.get("QUERY_STRING", ""))
+                year = int(query["year"][0]) if query.get("year") else None
+                assets = self.store.smart_data.list_assets(
+                    asset_type=query.get("asset_type", [None])[0], year=year,
+                    quality_status=query.get("quality_status", [None])[0],
+                    region_code=query.get("region_code", [None])[0],
+                )
+                return self._response(start_response, 200, {"assets": [self._public_asset(asset) for asset in assets]})
+            if method == "GET" and len(parts) == 2 and parts[0] == "data-assets":
+                return self._response(start_response, 200, self._public_asset(self.store.smart_data.asset(parts[1])))
+            if method == "POST" and parts == ["data-assets:scan"]:
+                actor = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                if not actor:
+                    return self._response(start_response, 503, {"error": "trusted data-custodian identity is not configured"})
+                if self.data_root is None:
+                    raise ValueError("GEP data root is not configured")
+                assets = scan_known_assets(self.data_root)
+                registered = [self.store.smart_data.register_asset(asset) for asset in assets]
+                return self._response(start_response, 201, {"registered_count": len(registered), "asset_ids": [item["asset_id"] for item in registered]})
+            if method == "GET" and parts == ["derived-observations"]:
+                query = parse_qs(environ.get("QUERY_STRING", ""))
+                if not query.get("metric") or not query.get("year") or not query.get("region_code"):
+                    raise ValueError("metric, year, and region_code are required")
+                observations = self.store.smart_data.find_observations(
+                    metric=query["metric"][0], year=int(query["year"][0]), region_code=query["region_code"][0],
+                    unit=query.get("unit", [None])[0],
+                )
+                return self._response(start_response, 200, {"observations": observations})
             if method == "GET" and len(parts) == 2 and parts[0] == "data-admissions":
                 return self._response(start_response, 200, self.store.data_admission(parts[1]))
             if method == "POST" and parts == ["data-admissions"]:
@@ -190,7 +234,7 @@ class DemoApi:
             return self._response(start_response, 404, {"error": "route not found"})
         except SnapshotBlocked as error:
             return self._response(start_response, 422, {"error": str(error), "blocking_nodes": error.blocking})
-        except ConflictError as error:
+        except (ConflictError, SmartDataConflictError) as error:
             return self._response(start_response, 409, {"error": str(error)})
         except KeyError as error:
             return self._response(start_response, 404, {"error": str(error)})
