@@ -43,6 +43,16 @@ function updateHeader(graph) {
   const expert = state.nodes.filter(node => node.acquisition_status === "manual_required").length;
   const failed = state.nodes.filter(node => node.acquisition_status === "agent_failed").length;
   const active = state.nodes.filter(node => ["agent_queued", "agent_running"].includes(node.acquisition_status)).length;
+  if (state.automation) {
+    const classes=state.automation.result_classes || {};
+    const prepared=(classes.observed||0)+(classes.public_calculation||0)+(classes.model_estimate||0)+(classes.not_applicable_candidate||0);
+    const humanGroups=(state.automation.human_work || []).length;
+    $("#task-state").textContent=`任务 ${graph.task.task_id.slice(0,8)} · 图版本 ${graph.task.graph_version} · ${prepared} 项智能体准备 · ${humanGroups} 个人工事项`;
+    $("#graph-summary").textContent=`已建立 3 类、22 项指标；${active} 项处理中 · ${prepared} 项智能体完成 · ${humanGroups} 个人工事项 · ${failed} 项执行失败`;
+    $("#agent-title").textContent=active ? `智能体处理中 · ${active} 项` : `智能体本轮已完成 · ${prepared} 项`;
+    $("#agent-text").textContent=`底层缺口已归并为 ${humanGroups} 个人工事项包；模型估算会明确标注并进入智能试算。`;
+    updateNextAction({active,auto:0,review:0,gap:0,expert:humanGroups,failed}); return;
+  }
   $("#task-state").textContent = `任务 ${graph.task.task_id.slice(0, 8)} · 图版本 ${graph.task.graph_version} · ${auto} 项自动采用 · ${review} 项建议复核`;
   $("#graph-summary").textContent = `已建立 3 类、22 项指标；${active} 项处理中 · ${auto} 项自动采用 · ${review} 项建议复核 · ${gap} 项等待数据 · ${expert} 项专家介入 · ${failed} 项执行失败`;
   $("#agent-title").textContent = active ? `智能体处理中 · ${active} 项` : "本轮智能体处理已停在审核闸门";

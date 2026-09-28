@@ -12,7 +12,11 @@ export function renderAssetCatalog(container, assets, type = "") {
 
 export function renderHumanWork(container, items = []) {
   const labels = {needs_department_data:"等待部门数据",needs_business_decision:"需要业务判断"};
-  container.innerHTML = items.length ? items.map(item => `<article class="human-card"><strong>${labels[item.type] || escapeHtml(item.type)}</strong><span>${item.count} 项</span><p>${(item.nodes || []).map(escapeHtml).join("、")}</p></article>`).join("") : '<p class="smart-empty">当前没有人工事项。</p>';
+  container.innerHTML = items.length ? items.map(item => {
+    const preview=(item.nodes || []).slice(0,5).map(escapeHtml).join("、");
+    const packageName=item.type === "needs_department_data" ? "部门数据包" : "业务判断包";
+    return `<article class="human-card"><strong>${labels[item.type] || escapeHtml(item.type)}</strong><span>${item.count} 个底层字段，已合并为 1 个${packageName}</span><p>${preview}${item.count > 5 ? " 等" : ""}</p></article>`;
+  }).join("") : '<p class="smart-empty">当前没有人工事项。</p>';
 }
 
 export function renderCalculationChain(container, chain) {
