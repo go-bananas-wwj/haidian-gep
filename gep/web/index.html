@@ -38,7 +38,6 @@
       <div class="section-head"><div><p class="eyebrow">数据准备</p><h1>智能体先建立 GEP 数据图，再由人工补齐和审核</h1><p>根节点按物质产品、调节服务和文化服务展开。动画只回放已经持久化的智能体或人工事件。</p></div><div class="canvas-tools"><button id="zoom-out">−</button><span id="zoom-value">100%</span><button id="zoom-in">+</button><button id="collapse-all">折叠</button><button id="expand-all">展开</button></div></div>
       <div class="prepare-layout"><div class="canvas-card"><div class="canvas-caption"><span class="live-dot"></span><span id="graph-summary">等待任务图</span><span class="muted">点击农产品、林产品或任一指标查看其数据支路</span></div><div id="graph-canvas" class="canvas" aria-live="polite"></div></div>
         <aside class="right-rail"><div class="rail-card"><p class="eyebrow">当前补充</p><h2 id="agent-title">智能体准备中</h2><p id="agent-text">创建任务后，智能体会根据指标目录逐项定位可用来源。</p></div><div class="rail-card"><p class="eyebrow">审核闸门</p><div id="gate-summary" class="gate-summary">尚未加载</div><button id="go-scheme" class="wide">查看核算方案</button></div><div class="rail-card event-card"><p class="eyebrow">已持久化事件</p><ol id="event-list" class="event-list"><li>暂无事件</li></ol></div></aside></div>
-      <section id="detail-board" class="detail-board" hidden><div class="section-head compact"><div><p class="eyebrow">指标详情</p><h2 id="detail-subject">农产品</h2><p id="detail-description">按产品—核算要素—来源建立可审核支路。</p></div><button id="close-detail">收起详情</button></div><div id="fishbone" class="fishbone" aria-label="产品数据鱼骨图"></div></section>
     </section>
 
     <section class="page" data-page-panel="scheme" hidden><div class="section-head"><div><p class="eyebrow">核算方案</p><h1>冻结前逐项确认</h1><p>图版本、数据版本、边界和公式版本共同构成可复算快照。</p></div><button id="readiness">刷新核算闸门</button></div><div id="readiness-card" class="readiness-card"><h2>尚未加载任务</h2></div><div class="action-row"><button id="freeze" class="primary" disabled>生成核算快照</button><span class="muted">快照仅在全部适用输入已审核时生成。</span></div></section>
@@ -47,7 +46,21 @@
 
     <section class="page" data-page-panel="delivery" hidden><div class="section-head"><div><p class="eyebrow">结果与交付</p><h1>区级总账、空间结果与附录 E</h1><p>空间化结果只在具备经核验的空间输入时展示；区级非空间总账单独列示。</p></div><button id="appendix-e">刷新附录 E</button></div><div class="delivery-grid"><div id="map-panel" class="map-panel"></div><div id="ledger-panel" class="ledger-panel"><h2>区级总账</h2><p>尚无可展示的正式核算结果。</p></div></div><div id="appendix-panel" class="appendix-panel"><h2>附录 E：输入完整性</h2><p>尚未加载。</p></div></section>
   </main>
-  <dialog id="evidence-dialog" class="evidence-dialog"><div class="dialog-top"><div><p class="eyebrow">智能体补充与审核</p><h2 id="evidence-title">数据节点</h2><p id="evidence-status" class="status-line"></p></div><button id="close-evidence" class="icon-button" aria-label="关闭">×</button></div><section class="evidence-result"><span>当前结果</span><strong id="evidence-value">待补充</strong><span id="evidence-unit"></span></section><section><h3>智能体如何补充</h3><p id="evidence-explanation">尚未形成可审核候选。</p></section><section><h3>来源与定位</h3><div id="source-card" class="source-card">尚无可核验来源。</div></section><details><summary>查看工具执行记录</summary><div id="tool-record" class="tool-record">尚无工具执行记录。</div></details><section><h3>方法、范围与待确认事项</h3><div id="method-card" class="method-card">尚未加载。</div></section><div id="evidence-actions" class="dialog-actions"><span class="muted">请求智能体补充</span></div></dialog>
+  <div id="drawer-overlay" class="drawer-overlay" hidden>
+    <aside id="detail-drawer" class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true" tabindex="-1">
+      <header class="drawer-header"><div><p class="eyebrow">智能体补充与审核</p><h2 id="drawer-title">数据节点</h2><p id="drawer-status" class="status-line"></p></div><button id="close-drawer" class="icon-button" aria-label="关闭详情">×</button></header>
+      <button id="drawer-back" class="drawer-back" type="button" hidden>← 返回科目详情</button>
+      <div id="drawer-indicator-view" class="drawer-view" hidden><p id="detail-description">按核算要素、来源和审核状态组织数据支路。</p><div id="fishbone" class="fishbone" aria-label="产品数据鱼骨图"></div></div>
+      <div id="drawer-evidence-view" class="drawer-view" hidden>
+        <section class="evidence-result"><span>当前结果</span><strong id="evidence-value">待补充</strong><span id="evidence-unit"></span></section>
+        <section><h3>智能体如何补充</h3><p id="evidence-explanation">尚未形成可审核候选。</p></section>
+        <section><h3>来源与定位</h3><div id="source-card" class="source-card">尚无可核验来源。</div></section>
+        <details><summary>查看工具执行记录</summary><div id="tool-record" class="tool-record">尚无工具执行记录。</div></details>
+        <section><h3>方法、范围与待确认事项</h3><div id="method-card" class="method-card">尚未加载。</div></section>
+        <div id="evidence-actions" class="dialog-actions"><span class="muted">请求智能体补充</span></div>
+      </div>
+    </aside>
+  </div>
   <dialog id="assist-dialog" class="assist-dialog"><h2 id="assist-title">人工协助</h2><p id="assist-copy"></p><label>处理说明<textarea id="assist-note" rows="3" placeholder="说明上传材料、估计依据或暂缓原因"></textarea></label><div class="dialog-actions"><button id="cancel-assist">取消</button><button id="confirm-assist" class="primary">保存为待审核事项</button></div></dialog>
   <script type="module" src="/app.js"></script>
   <!-- Canvas module contract: localStorage haidian-gep:view-layout; pointerdown; style.zoom; 折叠全部。

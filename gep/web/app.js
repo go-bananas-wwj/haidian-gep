@@ -3,7 +3,8 @@ import { GepGraph, nodeState } from "./graph.js";
 import { renderMap } from "./map.js";
 
 const $ = selector => document.querySelector(selector);
-const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, supplementKeys:{}, graph:null, selected:null, appendix:null };
+const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, supplementKeys:{}, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, appendix:null };
+let lastDrawerTrigger = null;
 const notice = text => { $("#notice").textContent = text; };
 const escape = value => String(value ?? "").replace(/[&<>"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[char]));
 
@@ -42,7 +43,8 @@ async function reload() {
   state.task = graph.task; state.nodes = graph.nodes; state.snapshotId = snapshots.snapshots[0]?.snapshot_id || null;
   state.graph.loadView(state.task.task_id); state.graph.render(state.nodes); updateHeader(graph);
   $("#freeze").disabled = false; $("#execute-run").disabled = !state.snapshotId;
-  if (state.selected) renderDetail(state.selected);
+  if (state.selected && state.drawerMode === "indicator") openIndicatorDrawer(state.selected, state.selectedDescription, null);
+  if (state.selected && state.drawerMode === "evidence") openEvidenceDrawer(state.selected, state.selectedIndicator, null);
   await loadTasks(); await loadPackage(graph.task.data_version);
 }
 async function loadPackage(version) {
@@ -56,14 +58,37 @@ async function pollEvents() {
 }
 function startPolling() { clearInterval(state.eventTimer); state.eventTimer = setInterval(pollEvents, 5000); pollEvents(); }
 async function openTask(task) {
-  state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null; await reload(); startPolling(); switchPage("prepare"); notice(`已恢复任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
+  closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null; await reload(); startPolling(); switchPage("prepare"); notice(`已恢复任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
 }
-function renderDetail(node, description) {
-  const current = state.nodes.find(item => item.node_id === node.node_id) || node; state.selected = current;
-  $("#detail-board").hidden = false; $("#detail-subject").textContent = `${current.node_key} · ${current.label}`; $("#detail-description").textContent = description || "按核算要素、来源和审核状态组织数据支路。";
-  const fishbone = $("#fishbone"); fishbone.replaceChildren(state.graph.renderFishbone(current, state.nodes, showEvidence));
+
+function drawerOpen() { return !$("#drawer-overlay").hidden; }
+function showDrawer(trigger) {
+  if (!drawerOpen() && trigger instanceof HTMLElement) lastDrawerTrigger = trigger;
+  const overlay = $("#drawer-overlay"); const drawer = $("#detail-drawer");
+  overlay.hidden = false; drawer.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => { overlay.classList.add("open"); drawer.classList.add("open"); $("#close-drawer").focus(); });
+}
+function closeDrawer({ restoreFocus = true } = {}) {
+  const overlay = $("#drawer-overlay"); const drawer = $("#detail-drawer");
+  if (!overlay || overlay.hidden) return;
+  overlay.classList.remove("open"); drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true");
+  state.selected = null; state.selectedIndicator = null; state.drawerMode = null;
+  setTimeout(() => { if (!drawer.classList.contains("open")) overlay.hidden = true; }, 180);
+  if (restoreFocus && lastDrawerTrigger?.isConnected) lastDrawerTrigger.focus();
+  lastDrawerTrigger = null;
+}
+function openIndicatorDrawer(node, description, trigger = document.activeElement) {
+  const current = state.nodes.find(item => item.node_id === node.node_id) || node;
+  state.selected = current; state.selectedIndicator = current; state.selectedDescription = description || "按核算要素、来源和审核状态组织数据支路。"; state.drawerMode = "indicator";
+  $("#drawer-title").textContent = `${current.node_key} · ${current.label}`; $("#drawer-status").textContent = nodeState(current)[0];
+  $("#detail-description").textContent = state.selectedDescription; $("#drawer-back").hidden = true;
+  $("#drawer-evidence-view").hidden = true; $("#drawer-indicator-view").hidden = false;
+  $("#fishbone").replaceChildren(state.graph.renderFishbone(current, state.nodes, input => openEvidenceDrawer(input, current)));
+  showDrawer(trigger);
 }
 function evidenceText(evidence) {
+  const explanation = evidence.evidence?.current?.explanation || evidence.evidence?.explanation;
+  if (explanation) return explanation;
   if (evidence.value !== null) return `智能体定位到一条候选记录，当前值为 ${evidence.value} ${evidence.unit || ""}。提交前须核对年度、区域和来源定位，再由人工审核。`;
   if (evidence.acquisition_status === "awaiting_agent") return "尚未形成候选值。智能体需要先检索已登记来源；如果来源不存在，请选择人工上传、经批准的估计或暂缓。";
   return "当前节点尚无可审核候选，系统不会把空值自动填为零。";
@@ -71,19 +96,20 @@ function evidenceText(evidence) {
 function sourceHtml(source) {
   if (!source || !Object.keys(source).length) return "尚无可核验来源。";
   const sourceId = source.source_id || source.original?.source_id || source.current?.source_id || "未登记来源 ID";
-  const file = source.source_file || source.original?.source_file || "来源文件待补充";
-  const locator = source.locator || source.original?.locator || [source.table_id && `表 ${source.table_id}`, source.printed_page && `印刷页 ${source.printed_page}`].filter(Boolean).join("，") || "定位信息待补充";
+  const file = source.source_file || source.current?.source_file || source.original?.source_file || "来源文件待补充";
+  const locator = source.locator || source.current?.locator || source.original?.locator || [source.table_id && `表 ${source.table_id}`, source.printed_page && `印刷页 ${source.printed_page}`].filter(Boolean).join("，") || "定位信息待补充";
   return `<strong>${escape(sourceId)}</strong><br>${escape(file)}<br><span class="muted">定位：${escape(locator)}</span>`;
 }
 function methodHtml(node) {
   const e = node.evidence || {}; return `适用性：${escape(node.applicability_status)}<br>方法：${escape(e.method_id || "方法卡待人工确认")}<br>标准条款：${escape(e.standard_clause || "待补充")}<br>当前状态：${escape(nodeState(node)[0])}`;
 }
-async function showEvidence(node) {
+async function openEvidenceDrawer(node, parentIndicator = state.selectedIndicator, trigger = document.activeElement) {
   try {
     const evidence = await taskApi.evidence(node.node_id); const [label] = nodeState(evidence);
-    $("#evidence-title").textContent = `${evidence.node_key} · ${evidence.label}`; $("#evidence-status").textContent = `${label} · 输入版本 ${evidence.version}`;
+    state.selected = evidence; state.selectedIndicator = parentIndicator; state.drawerMode = "evidence";
+    $("#drawer-title").textContent = `${evidence.node_key} · ${evidence.label}`; $("#drawer-status").textContent = `${label} · 输入版本 ${evidence.version}`;
     $("#evidence-value").textContent = evidence.value === null ? "待补充" : evidence.value; $("#evidence-unit").textContent = evidence.unit || "";
-    $("#evidence-explanation").textContent = evidenceText(evidence); $("#source-card").innerHTML = sourceHtml(evidence.evidence); $("#tool-record").textContent = evidence.evidence?.tool_run || "当前未记录可展示的工具执行；系统只接受带来源定位的候选。"; $("#method-card").innerHTML = methodHtml(evidence);
+    $("#evidence-explanation").textContent = evidenceText(evidence); $("#source-card").innerHTML = sourceHtml(evidence.evidence); $("#tool-record").textContent = evidence.evidence?.current?.tool_run_id || evidence.evidence?.tool_run || "当前未记录可展示的工具执行；系统只接受带来源定位的候选。"; $("#method-card").innerHTML = methodHtml(evidence);
     const actions = $("#evidence-actions"); actions.replaceChildren();
     if (evidence.review_status === "pending_review") {
       actions.append(reviewButton(evidence, "approved", "审核通过", true), reviewButton(evidence, "returned", "退回重查"));
@@ -92,15 +118,15 @@ async function showEvidence(node) {
       const supplement = document.createElement("button"); supplement.className = "primary"; supplement.textContent = "请求智能体补充"; supplement.onclick = () => requestSupplement(evidence); actions.append(supplement);
     }
     for (const [kind, labelText] of [["upload", "上传材料"], ["estimate", "填写估计依据"], ["defer", "暂缓处理"]]) { const button = document.createElement("button"); button.textContent = labelText; button.onclick = () => openAssist(kind, evidence); actions.append(button); }
-    $("#evidence-dialog").showModal();
+    $("#drawer-back").hidden = !parentIndicator; $("#drawer-indicator-view").hidden = true; $("#drawer-evidence-view").hidden = false; showDrawer(trigger);
   } catch (error) { notice(`读取证据失败：${error.message}`); }
 }
 function reviewButton(evidence, decision, label, primary = false) {
   const button = document.createElement("button"); button.textContent = label; if (primary) button.className = "primary";
-  button.onclick = async () => { const note = window.prompt(decision === "approved" ? "填写审核意见" : "填写退回原因"); if (!note) return; try { await taskApi.review(evidence.node_id, { expected_version:evidence.version, decision, note }); $("#evidence-dialog").close(); await reload(); } catch (error) { if (error.status === 409) notice("该节点已被其他操作更新，请重新打开后查看最新版本。"); else notice(`审核未完成：${error.message}`); } }; return button;
+  button.onclick = async () => { const note = window.prompt(decision === "approved" ? "填写审核意见" : "填写退回原因"); if (!note) return; try { await taskApi.review(evidence.node_id, { expected_version:evidence.version, decision, note }); closeDrawer(); await reload(); } catch (error) { if (error.status === 409) notice("该节点已被其他操作更新，请重新打开后查看最新版本。"); else notice(`审核未完成：${error.message}`); } }; return button;
 }
 async function requestSupplement(evidence) {
-  try { const idempotencyKey = state.supplementKeys[evidence.node_id] ||= `web-${crypto.randomUUID()}`; const job = await taskApi.supplement(state.task.task_id, { node_id:evidence.node_id, idempotency_key:idempotencyKey }); $("#evidence-dialog").close(); notice(job.status === "blocked" ? `补充请求已记录，但当前无法运行：${job.reason}` : "已提交智能体补充请求；候选形成后仍需审核。"); await reload(); }
+  try { const idempotencyKey = state.supplementKeys[evidence.node_id] ||= `web-${crypto.randomUUID()}`; const job = await taskApi.supplement(state.task.task_id, { node_id:evidence.node_id, idempotency_key:idempotencyKey }); closeDrawer(); notice(job.status === "blocked" ? `补充请求已记录，但当前无法运行：${job.reason}` : "已提交智能体补充请求；候选形成后仍需审核。"); await reload(); }
   catch (error) { notice(`补充请求失败：${error.message}`); }
 }
 let assistance = null;
@@ -116,5 +142,15 @@ async function loadAppendix() { if (!state.task) return; try { const appendix = 
 $("#task-form").addEventListener("submit", async event => { event.preventDefault(); try { const task = await taskApi.create({ region_code:"110108", year:2024, boundary_version:$("#boundary").value, standard_version:"GB/T 46869-2025", data_version:$("#data-version").value }); await openTask(task); } catch (error) { notice(`创建任务失败：${error.message}`); } });
 for (const button of document.querySelectorAll(".step")) button.onclick = () => switchPage(button.dataset.page);
 $("#zoom-in").onclick = () => { state.graph.setZoom(.1); $("#zoom-value").textContent = `${Math.round(state.graph.zoom * 100)}%`; }; $("#zoom-out").onclick = () => { state.graph.setZoom(-.1); $("#zoom-value").textContent = `${Math.round(state.graph.zoom * 100)}%`; }; $("#collapse-all").onclick = () => state.graph.setCollapsed(true); $("#expand-all").onclick = () => state.graph.setCollapsed(false);
-$("#close-detail").onclick = () => { $("#detail-board").hidden = true; state.selected = null; }; $("#close-evidence").onclick = () => $("#evidence-dialog").close(); $("#cancel-assist").onclick = () => $("#assist-dialog").close(); $("#confirm-assist").onclick = saveAssist; $("#go-scheme").onclick = () => switchPage("scheme"); $("#readiness").onclick = refreshReadiness; $("#freeze").onclick = freeze; $("#execute-run").onclick = executeRun; $("#appendix-e").onclick = loadAppendix;
-state.graph = new GepGraph($("#graph-canvas"), { onNode:showEvidence, onDetail:renderDetail }); loadTasks();
+$("#close-drawer").onclick = () => closeDrawer(); $("#drawer-overlay").onclick = event => { if (event.target === $("#drawer-overlay")) closeDrawer(); }; $("#drawer-back").onclick = () => { if (state.selectedIndicator) openIndicatorDrawer(state.selectedIndicator, state.selectedDescription, null); };
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && drawerOpen()) { closeDrawer(); return; }
+  if (event.key !== "Tab" || !drawerOpen()) return;
+  const focusable = [...$("#detail-drawer").querySelectorAll('button:not([hidden]):not(:disabled),a[href],input,textarea,[tabindex]:not([tabindex="-1"])')].filter(element => element.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0], last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+$("#cancel-assist").onclick = () => $("#assist-dialog").close(); $("#confirm-assist").onclick = saveAssist; $("#go-scheme").onclick = () => switchPage("scheme"); $("#readiness").onclick = refreshReadiness; $("#freeze").onclick = freeze; $("#execute-run").onclick = executeRun; $("#appendix-e").onclick = loadAppendix;
+state.graph = new GepGraph($("#graph-canvas"), { onNode:openEvidenceDrawer, onDetail:openIndicatorDrawer }); loadTasks();

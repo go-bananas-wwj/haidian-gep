@@ -63,6 +63,35 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn("粮食作物", graph)
         self.assertIn("小麦（候选）", graph)
 
+    def test_indicator_and_evidence_details_share_one_right_drawer(self):
+        """Break caught: node details could open below the viewport or in a second competing modal."""
+        index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        self.assertEqual(index.count('id="detail-drawer"'), 1)
+        self.assertIn('role="dialog"', index)
+        self.assertIn('aria-modal="true"', index)
+        self.assertIn('aria-labelledby="drawer-title"', index)
+        self.assertNotIn('id="detail-board"', index)
+        self.assertNotIn('id="evidence-dialog"', index)
+        self.assertIn("openIndicatorDrawer", app)
+        self.assertIn("openEvidenceDrawer", app)
+        self.assertIn("closeDrawer", app)
+
+    def test_drawer_is_responsive_and_keyboard_accessible(self):
+        """Break caught: the right drawer could trap focus or overflow a phone viewport."""
+        styles = (WEB_ROOT / "styles.css").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn(".detail-drawer", styles)
+        self.assertRegex(styles, r"\.detail-drawer\s*\{[^}]*width:\s*(4[2-8]0px|min\()")
+        self.assertIn("transition:", styles)
+        self.assertIn(":focus-visible", styles)
+        self.assertRegex(styles, r"\.drawer-overlay\[hidden\]\s*\{[^}]*display:\s*none")
+        self.assertRegex(styles, r"@media\s*\(max-width:\s*600px\)[\s\S]*\.detail-drawer[^{]*\{[^}]*width:\s*(100%|min\()")
+        self.assertIn('event.key === "Escape"', app)
+        self.assertIn("lastDrawerTrigger", app)
+
 
 if __name__ == "__main__":
     unittest.main()
