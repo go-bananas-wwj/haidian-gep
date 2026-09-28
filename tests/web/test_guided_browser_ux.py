@@ -158,6 +158,24 @@ class GuidedBrowserUxTests(unittest.TestCase):
         self.assertTrue(all(path and path != "M 0 0 C 0 18, 0 18, 0 0" for path in paths))
         page.close()
 
+    def test_task_centre_collapses_older_history_for_first_time_users(self):
+        """Break caught: a long flat task history pushes the actual workflow out of view."""
+        page = self.browser.new_page()
+        tasks = [{
+            "task_id": f"task-{index}", "year": 2024, "graph_version": 10 - index,
+            "pending_review_count": index, "formal_blocker_count": 20 + index,
+            "data_version": "reference-2024-v0.1",
+        } for index in range(5)]
+        page.route("**/api/tasks", lambda route: route.fulfill(json={"tasks": tasks}))
+        page.goto(self.base_url, wait_until="networkidle")
+        visible_buttons = page.locator("button:visible", has_text="恢复任务")
+        self.assertEqual(visible_buttons.count(), 3)
+        more = page.get_by_text("查看其余 2 个历史任务")
+        self.assertTrue(more.is_visible())
+        more.click()
+        self.assertEqual(page.locator("button:visible", has_text="恢复任务").count(), 5)
+        page.close()
+
 
 if __name__ == "__main__":
     unittest.main()

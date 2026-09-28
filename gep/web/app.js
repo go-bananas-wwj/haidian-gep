@@ -16,13 +16,23 @@ function switchPage(page) {
   if (page === "scheme") refreshReadiness(); if (page === "delivery") loadAppendix();
 }
 
-function taskRow(task) {
+function taskRow(task, { latest = false } = {}) {
   const row = document.createElement("article"); row.className = "task-row";
-  row.innerHTML = `<div><strong>海淀区 ${task.year} 年度核算</strong><div class="task-meta">图版本 ${task.graph_version} · ${task.pending_review_count} 项待审核 · ${task.formal_blocker_count} 个正式阻断项</div></div>`;
+  row.innerHTML = `<div><strong>海淀区 ${task.year} 年度核算</strong>${latest ? '<span class="latest-task">最近任务</span>' : ""}<div class="task-meta">图版本 ${task.graph_version} · ${task.pending_review_count} 项待审核 · ${task.formal_blocker_count} 个正式阻断项</div></div>`;
   const button = document.createElement("button"); button.textContent = "恢复任务"; button.onclick = () => openTask(task); row.append(button); return row;
 }
 async function loadTasks() {
-  try { const { tasks } = await taskApi.tasks(); const list = $("#task-list"); list.replaceChildren(); if (!tasks.length) list.innerHTML = '<span class="muted">尚无保存的任务。</span>'; else tasks.forEach(task => list.append(taskRow(task))); }
+  try {
+    const { tasks } = await taskApi.tasks(); const list = $("#task-list"); list.replaceChildren();
+    if (!tasks.length) { list.innerHTML = '<span class="muted">尚无保存的任务。</span>'; return; }
+    tasks.slice(0, 3).forEach((task, index) => list.append(taskRow(task, { latest:index === 0 })));
+    if (tasks.length > 3) {
+      const history = document.createElement("details"); history.className = "task-history";
+      const summary = document.createElement("summary"); summary.textContent = `查看其余 ${tasks.length - 3} 个历史任务`;
+      const rows = document.createElement("div"); rows.className = "task-list task-list-history";
+      tasks.slice(3).forEach(task => rows.append(taskRow(task))); history.append(summary, rows); list.append(history);
+    }
+  }
   catch (error) { $("#task-list").textContent = `读取任务中心失败：${error.message}`; }
 }
 function updateHeader(graph) {
