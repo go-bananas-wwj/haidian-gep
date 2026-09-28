@@ -176,6 +176,11 @@ class SmartDataStore:
         query += " ORDER BY observation_id"
         return [self._observation_row(row) for row in self.connection.execute(query, parameters).fetchall()]
 
+    def observation(self, observation_id: str) -> dict[str, Any]:
+        row=self.connection.execute("SELECT * FROM derived_observations WHERE observation_id=?",(observation_id,)).fetchone()
+        if row is None: raise KeyError("smart data observation not found")
+        return self._observation_row(row)
+
     def register_plan(self, plan: CalculationPlan) -> dict[str, Any]:
         for observation_id in plan.input_bindings.values():
             if self.connection.execute(

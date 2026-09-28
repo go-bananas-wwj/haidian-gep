@@ -7,6 +7,7 @@ from typing import Any
 
 
 DECISION_FIELDS = {"deduplication_choice", "applicability_evidence", "product_ownership", "local_origin", "attribution"}
+PROXY_ALIASES = {"npp_or_nep":"npp", "area":"ecosystem_area", "temperature_humidity":"temperature", "transpiration":"actual_et"}
 
 
 class SmartDataWorkflow:
@@ -27,8 +28,9 @@ class SmartDataWorkflow:
                     "locator":"region_code=110108", "source_sha256":source_hash,
                     "license_or_access":"ODbL 1.0", "tool_run_id":"boundary:inland-check:v1",
                     "extracted_fragment":"海淀区不与海岸线相交"}}
+        query_metric=PROXY_ALIASES.get(metric,metric)
         observations = self.store.find_observations(
-            metric=metric, year=int(work_order.get("year") or 0), region_code=str(work_order.get("region_code") or ""),
+            metric=query_metric, year=int(work_order.get("year") or 0), region_code=str(work_order.get("region_code") or ""),
         )
         if observations:
             chosen = sorted(observations, key=lambda item: (-item["confidence"], item["observation_id"]))[0]
@@ -37,7 +39,7 @@ class SmartDataWorkflow:
             return {
                 "outcome":"candidate", "risk_tier":"B", "auto_adopt":True,
                 "result_class":chosen["evidence_class"], "value":chosen["value"], "unit":chosen["unit"],
-                "explanation":f"已从数据后台复用 {chosen['observation_id']}，作为明确标注的智能试算输入。",
+                "explanation":f"已从数据后台复用 {chosen['observation_id']}，作为明确标注的智能试算{'代理' if query_metric != metric else ''}输入。",
                 "searched_tools":["smart_data_observations"],
                 "evidence":{"source_id":chosen["observation_id"], "source_type":"derived_observation",
                     "locator":f"derived_observations/{chosen['observation_id']}", "source_sha256":identity_hash,

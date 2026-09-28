@@ -39,6 +39,18 @@ class SmartDataWorkflowTests(unittest.TestCase):
         self.assertTrue(result["auto_adopt"])
         self.assertEqual(result["evidence"]["source_id"], "precip-2024")
 
+    def test_workflow_uses_explicit_safe_proxy_aliases(self):
+        self.store.smart_data.register_observation(ObservationRecord.from_dict({
+            "observation_id":"npp-2024","metric":"npp","value":.38,"unit":"kgC/m2/a","region_code":"110108",
+            "year":2024,"spatial_grain":"district","method_id":"modis.npp","method_version":"v1",
+            "input_asset_ids":["climate"],"confidence":.75,"uncertainty":{"not_nep":True},"evidence_class":"public_calculation"}))
+        result=SmartDataWorkflow(self.store.smart_data).run({"data_version":"smart-data-2024-v1","node_label":"npp_or_nep",
+            "node_key":"R6.npp_or_nep","node_kind":"input","indicator_id":"R6","year":2024,"region_code":"110108"})
+        self.assertEqual(result["value"],.38)
+        self.assertEqual(result["unit"],"kgC/m2/a")
+        self.assertEqual(result["result_class"],"public_calculation")
+        self.assertIn("代理",result["explanation"])
+
     def test_smart_task_schedules_only_inputs_and_indicators_get_progress(self):
         self.store.close()
         self.store = GepStore(Path(self.directory.name) / "smart.sqlite3", auto_enqueue_on_create=True, smart_data_enabled=True)
@@ -98,6 +110,10 @@ class SmartDataWorkflowTests(unittest.TestCase):
         self.assertEqual(current["value"], 855.17)
         self.assertEqual(current["evidence"]["current"]["result_class"], "model_estimate")
         self.assertTrue(current["evidence"]["current"]["demo_auto_adopt"])
+        chain=self.store.calculation_chain(node["node_id"])
+        self.assertEqual(chain["plan"]["method_id"],"monthly_sum")
+        self.assertEqual(chain["observations"][0]["observation_id"],"precip-2024")
+        self.assertEqual(chain["run"]["result"],{"value":855.17,"unit":"mm/a"})
 
     def test_feature_flag_off_preserves_legacy_indicator_scheduling(self):
         self.store.close()

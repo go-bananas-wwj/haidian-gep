@@ -228,7 +228,7 @@ class DemoApi:
                 if method == "GET" and parts[2:] == ["evidence"]:
                     return self._response(start_response, 200, self.store.evidence(node_id))
                 if method == "GET" and parts[2:] == ["calculation-chain"]:
-                    return self._response(start_response, 200, self.store.smart_data.calculation_chain(node_id))
+                    return self._response(start_response, 200, self.store.calculation_chain(node_id))
                 body = self._json_body(environ)
                 if method == "POST" and parts[2:] == ["reviews"]:
                     reviewer = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""

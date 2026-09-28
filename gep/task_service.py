@@ -449,7 +449,7 @@ class GepStore:
         if not readiness["demo_ready"]: raise SnapshotBlocked(readiness["missing_nodes"])
         graph = self.graph(task_id); chains = {}
         for node in graph["nodes"]:
-            try: chains[node["node_key"]] = self.smart_data.calculation_chain(node["node_id"])
+            try: chains[node["node_key"]] = self.calculation_chain(node["node_id"])
             except KeyError: pass
         snapshot_id = uuid.uuid4().hex
         payload = {"result_scope":"智能试算", "formal_gep_value":None, "task":graph["task"],
@@ -459,6 +459,20 @@ class GepStore:
                 (snapshot_id, task_id, json.dumps(payload, ensure_ascii=False, sort_keys=True), _utc_now()))
         return {"snapshot_id":snapshot_id, "task_id":task_id, "result_scope":"智能试算",
                 "formal_gep_value":None, "estimated_input_ratio":readiness["estimated_input_ratio"]}
+
+    def calculation_chain(self, node_id: str) -> dict[str, Any]:
+        try: return self.smart_data.calculation_chain(node_id)
+        except KeyError: pass
+        node=self._node_by_id(node_id); evidence=json.loads(node["evidence_json"]); current=evidence.get("current",evidence)
+        source_id=current.get("source_id")
+        if not source_id: raise KeyError("calculation chain not found")
+        observation=self.smart_data.observation(source_id)
+        assets=[self.smart_data.asset(asset_id) for asset_id in observation["input_asset_ids"]]
+        return {"plan":{"plan_id":f"observation-{source_id}","method_id":observation["method_id"],
+                "method_version":observation["method_version"],"explanation":current.get("explanation","复用数据后台派生观测。")},
+                "observations":[observation],"assets":assets,"run":{"calculation_run_id":current.get("tool_run_id",source_id),
+                "result":{"value":json.loads(node["value_json"]),"unit":node["unit"]},
+                "quality":{"evidence_classes":[observation["evidence_class"]],"uncertainty":observation["uncertainty"]}}}
 
     def snapshots(self, task_id: str) -> list[dict[str, Any]]:
         """List immutable snapshots for task recovery without exposing mutable graph state."""
