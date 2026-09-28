@@ -41,7 +41,8 @@
 
     <section class="page" data-page-panel="prepare" hidden>
       <div class="section-head"><div><p class="eyebrow">数据准备</p><h1>智能体自动研究，人工只处理异常与关键判断</h1><p>流线持续展示从年度核算到各科目的依赖方向；蓝色加速表示刚刚完成的真实工作事件。</p></div><div class="canvas-tools"><button id="zoom-out">−</button><span id="zoom-value">100%</span><button id="zoom-in">+</button><button id="collapse-all">折叠</button><button id="expand-all">展开</button></div></div>
-      <div class="prepare-layout"><div class="canvas-card"><div class="canvas-caption"><span class="live-dot"></span><span id="graph-summary">等待任务图</span><span class="muted">点击农产品、林产品或任一指标查看其数据支路</span></div><div id="graph-canvas" class="canvas" aria-live="polite"></div></div>
+      <div class="smart-tabs" role="tablist"><button id="show-indicator-workbench" class="active" role="tab">指标图</button><button id="show-data-backend" role="tab">数据后台</button></div>
+      <div id="indicator-workbench" class="prepare-layout"><div class="canvas-card"><div class="canvas-caption"><span class="live-dot"></span><span id="graph-summary">等待任务图</span><span class="muted">点击农产品、林产品或任一指标查看其数据支路</span></div><div id="graph-canvas" class="canvas" aria-live="polite"></div></div>
         <aside class="right-rail">
           <div id="next-action-card" class="next-action-card">
             <p class="eyebrow">你现在只需要做这一步</p>
@@ -53,6 +54,7 @@
           <div class="rail-card gate-card"><p class="eyebrow">审核闸门</p><div id="gate-summary" class="gate-summary">尚未加载</div><button id="batch-review" hidden>整批确认</button><button id="go-scheme" hidden>查看核算方案</button></div>
           <details class="rail-card event-card"><summary>查看最近事件</summary><ol id="event-list" class="event-list"><li>暂无事件</li></ol></details>
         </aside></div>
+      <section id="data-backend" class="data-backend" hidden><div class="data-backend-head"><div><p class="eyebrow">数据资产后台</p><h2>已登记的数据、质量与使用范围</h2></div><label>类型筛选<select id="asset-type-filter"><option value="">全部类型</option></select></label></div><div class="backend-grid"><div><h3>数据资产</h3><div id="asset-catalog" class="asset-catalog"></div></div><aside><h3>需要人工处理</h3><div id="human-work" class="human-work"></div></aside></div></section>
     </section>
 
     <section class="page" data-page-panel="scheme" hidden><div class="section-head"><div><p class="eyebrow">核算方案</p><h1>冻结前逐项确认</h1><p>图版本、数据版本、边界和公式版本共同构成可复算快照。</p></div><button id="readiness">刷新核算闸门</button></div><div id="readiness-card" class="readiness-card"><h2>尚未加载任务</h2></div><div class="action-row"><button id="freeze" class="primary" disabled>生成核算快照</button><span class="muted">快照仅在全部适用输入已审核时生成。</span></div></section>
@@ -72,6 +74,7 @@
         <section><h3>自动校验</h3><p id="evidence-validation">尚未形成校验结论。</p></section>
         <details><summary>工作执行记录</summary><div id="tool-record" class="tool-record">尚无工具执行记录。</div></details>
         <section><h3>方法、范围与风险</h3><div id="method-card" class="method-card">尚未加载。</div></section>
+        <section><h3>自动计算过程</h3><div id="calculation-chain">尚未形成计算链。</div></section>
         <div id="evidence-actions" class="dialog-actions"><button type="button">标记问题</button><button type="button">人工修正</button></div>
       </div>
     </aside>

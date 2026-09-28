@@ -2,9 +2,10 @@ import { taskApi } from "./api.js";
 import { GepGraph, nodeState } from "./graph.js";
 import { renderMap } from "./map.js";
 import { nextActionFor } from "./guide.js";
+import { renderAssetCatalog, renderCalculationChain, renderHumanWork } from "./smart-data.js";
 
 const $ = selector => document.querySelector(selector);
-const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, batchPreview:null, individualReviewMode:false, appendix:null };
+const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, batchPreview:null, individualReviewMode:false, appendix:null, automation:null, demoReadiness:null, assets:[] };
 let lastDrawerTrigger = null;
 let drawerRequestVersion = 0;
 const notice = text => { $("#notice").textContent = text; };
@@ -85,7 +86,11 @@ function renderEvents(events, { animate = true } = {}) {
 async function reload() {
   if (!state.task) return;
   const [graph, snapshots] = await Promise.all([taskApi.graph(state.task.task_id), taskApi.snapshots(state.task.task_id)]);
-  state.task = graph.task; state.nodes = graph.nodes; state.snapshotId = snapshots.snapshots[0]?.snapshot_id || null;
+  state.task = graph.task; state.snapshotId = snapshots.snapshots[0]?.snapshot_id || null;
+  if (graph.task.data_version === "smart-data-2024-v1") {
+    [state.automation, state.demoReadiness] = await Promise.all([taskApi.automationSummary(graph.task.task_id), taskApi.demoReadiness(graph.task.task_id)]);
+  } else { state.automation = null; state.demoReadiness = null; }
+  state.nodes = graph.nodes.map(node => node.kind === "indicator" ? {...node, progress:state.automation?.indicator_progress?.[node.node_key]} : node);
   state.graph.loadView(state.task.task_id); state.graph.render(state.nodes); updateHeader(graph);
   $("#freeze").disabled = false; $("#execute-run").disabled = !state.snapshotId;
   if (state.selected && state.drawerMode === "indicator") openIndicatorDrawer(state.selected, state.selectedDescription, null);
@@ -95,6 +100,19 @@ async function reload() {
 async function loadPackage(version) {
   try { const data = await taskApi.dataVersion(version); $("#data-package").hidden = false; $("#accounting-ready").textContent = data.accounting_ready ? "通过" : "未通过"; $("#alphaearth-candidates").textContent = data.alphaearth_candidates?.length ? `${data.alphaearth_candidates.length} 项` : "未提供"; }
   catch (_) { $("#data-package").hidden = false; $("#accounting-ready").textContent = "未登记"; $("#alphaearth-candidates").textContent = "待数据包登记"; }
+}
+async function showPrepareView(view) {
+  const backend = view === "backend";
+  $("#indicator-workbench").hidden = backend; $("#data-backend").hidden = !backend;
+  $("#show-indicator-workbench").classList.toggle("active", !backend); $("#show-data-backend").classList.toggle("active", backend);
+  if (!backend) { requestAnimationFrame(() => state.graph?.layoutEdges()); return; }
+  try {
+    const { assets } = await taskApi.assets({year:2024,region_code:"110108"}); state.assets = assets;
+    const filter = $("#asset-type-filter"); const selected = filter.value;
+    filter.replaceChildren(new Option("全部类型", ""), ...[...new Set(assets.map(asset => asset.asset_type))].sort().map(type => new Option(type, type)));
+    filter.value = selected; renderAssetCatalog($("#asset-catalog"), assets, filter.value);
+    renderHumanWork($("#human-work"), state.automation?.human_work || []);
+  } catch (error) { $("#asset-catalog").textContent = `读取数据后台失败：${error.message}`; }
 }
 async function pollEvents() {
   if (!state.task) return;
@@ -185,6 +203,7 @@ async function openEvidenceDrawer(node, parentIndicator = state.selectedIndicato
     $("#drawer-title").textContent = `${evidence.node_key} · ${evidence.label}`; $("#drawer-status").textContent = `${label} · 输入版本 ${evidence.version}`;
     $("#evidence-value").textContent = evidence.value === null ? "尚无数值" : evidence.value; $("#evidence-unit").textContent = evidence.unit || "";
     $("#source-card").innerHTML = sourceHtml(evidence.evidence); $("#evidence-validation").textContent = validationText(evidence); $("#tool-record").textContent = toolRecordText(evidence); $("#method-card").innerHTML = methodHtml(evidence);
+    try { renderCalculationChain($("#calculation-chain"), await taskApi.calculationChain(evidence.node_id)); } catch (_) { renderCalculationChain($("#calculation-chain"), null); }
     const actions = $("#evidence-actions"); actions.replaceChildren();
     if (evidence.review_status === "auto_verified") {
       if (state.individualReviewMode) actions.append(reviewButton(evidence, "approved", "确认采用", true));
@@ -263,6 +282,8 @@ document.addEventListener("keydown", event => {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 });
 $("#cancel-assist").onclick = () => $("#assist-dialog").close(); $("#confirm-assist").onclick = saveAssist;
+$("#show-indicator-workbench").onclick = () => showPrepareView("graph"); $("#show-data-backend").onclick = () => showPrepareView("backend");
+$("#asset-type-filter").onchange = () => renderAssetCatalog($("#asset-catalog"), state.assets, $("#asset-type-filter").value);
 $("#batch-review").onclick = openBatchReview; $("#close-batch-review").onclick = () => $("#batch-review-dialog").close();
 $("#confirm-batch-review").onclick = () => submitBatchReview(true); $("#cancel-batch-review").onclick = () => submitBatchReview(false);
 $("#go-scheme").onclick = () => switchPage("scheme"); $("#readiness").onclick = refreshReadiness; $("#freeze").onclick = freeze; $("#execute-run").onclick = executeRun; $("#appendix-e").onclick = loadAppendix;

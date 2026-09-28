@@ -42,6 +42,13 @@ function readableField(node) {
 export function nodeState(node) {
   if (node.review_status === "approved") return ["审核通过", "approved"];
   if (node.review_status === "returned") return ["退回重查", "returned"];
+  if (node.kind === "indicator" && node.progress) return [`${node.progress.prepared}/${node.progress.total} 已自动准备`, node.progress.status === "ready" ? "approved" : "review"];
+  const resultClass = node.evidence?.current?.result_class || node.evidence?.result_class;
+  if (resultClass === "public_calculation") return ["公开数据计算", "auto"];
+  if (resultClass === "model_estimate") return ["模型估算·已进入试算", "estimate"];
+  if (resultClass === "needs_department_data") return ["等待部门数据", "gap"];
+  if (resultClass === "needs_business_decision") return ["需要业务判断", "manual"];
+  if (resultClass === "not_applicable_candidate") return ["不适用候选", "review"];
   if (node.review_status === "auto_verified") return ["已自动采用·待整批确认", "auto"];
   if (node.review_status === "pending_review" && node.evidence?.corrections?.length) return ["人工已修正·待审核", "review"];
   if (node.review_status === "pending_review") return ["已补充·建议复核", "review"];
