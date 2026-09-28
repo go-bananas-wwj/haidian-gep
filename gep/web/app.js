@@ -3,7 +3,7 @@ import { GepGraph, nodeState } from "./graph.js";
 import { renderMap } from "./map.js";
 
 const $ = selector => document.querySelector(selector);
-const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, batchPreview:null, appendix:null };
+const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, batchPreview:null, individualReviewMode:false, appendix:null };
 let lastDrawerTrigger = null;
 let drawerRequestVersion = 0;
 const notice = text => { $("#notice").textContent = text; };
@@ -66,7 +66,7 @@ async function pollEvents() {
 }
 function startPolling() { clearInterval(state.eventTimer); state.eventTimer = setInterval(pollEvents, 5000); pollEvents(); }
 async function openTask(task, { playInitial = false } = {}) {
-  closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null;
+  closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null; state.individualReviewMode = false;
   let schedulingError = null; try { await taskApi.autoSupplement(task.task_id); } catch (error) { schedulingError = error; }
   await reload();
   const { events } = await taskApi.events(state.task.task_id, 0); state.lastEvent = events.at(-1)?.sequence || 0; renderEvents(events, { animate:playInitial });
@@ -149,6 +149,7 @@ async function openEvidenceDrawer(node, parentIndicator = state.selectedIndicato
     $("#source-card").innerHTML = sourceHtml(evidence.evidence); $("#evidence-validation").textContent = validationText(evidence); $("#tool-record").textContent = toolRecordText(evidence); $("#method-card").innerHTML = methodHtml(evidence);
     const actions = $("#evidence-actions"); actions.replaceChildren();
     if (evidence.review_status === "auto_verified") {
+      if (state.individualReviewMode) actions.append(reviewButton(evidence, "approved", "确认采用", true));
       actions.append(reviewButton(evidence, "returned", "标记问题"), assistanceButton("estimate", "人工修正", evidence));
     } else if (evidence.review_status === "pending_review") {
       actions.append(reviewButton(evidence, "approved", "确认采用", true), reviewButton(evidence, "returned", "要求重查"), assistanceButton("estimate", "人工修正", evidence));
@@ -196,9 +197,9 @@ async function submitBatchReview(ignore) {
     });
     $("#batch-review-dialog").close();
     if (ignore) {
-      notice(`已整批确认 ${result.approved_count} 项；${result.hard_blocker_nodes.length} 个硬阻断保持不变。`); await reload();
+      state.individualReviewMode = false; notice(`已整批确认 ${result.approved_count} 项；${result.hard_blocker_nodes.length} 个硬阻断保持不变。`); await reload();
     } else {
-      notice(`已保留 ${result.reviewable_count} 项逐项审核。`);
+      state.individualReviewMode = true; notice(`已保留 ${result.reviewable_count} 项逐项审核。`);
       const firstKey = result.review_queue[0]; const first = state.nodes.find(node => node.node_key === firstKey); if (first) openEvidenceDrawer(first);
     }
   } catch (error) { notice(error.status === 409 ? "图版本已变化，请重新打开整批确认。" : `整批确认失败：${error.message}`); }

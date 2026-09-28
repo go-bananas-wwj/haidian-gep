@@ -174,6 +174,8 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn("taskApi.batchReview", app)
         self.assertIn("submitBatchReview(true)", app)
         self.assertIn("submitBatchReview(false)", app)
+        self.assertIn("individualReviewMode", app)
+        self.assertIn('reviewButton(evidence, "approved", "确认采用", true)', app)
 
 
 if __name__ == "__main__":
