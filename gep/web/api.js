@@ -11,6 +11,7 @@ export const taskApi = {
   evidence: nodeId => api(`/nodes/${nodeId}/evidence`), dataVersion: version => api(`/data-versions/${encodeURIComponent(version)}`),
   create: payload => api("/tasks", { method:"POST", body:JSON.stringify(payload) }), snapshot: taskId => api(`/tasks/${taskId}/snapshots`, { method:"POST", body:"{}" }),
   supplement: (taskId, payload) => api(`/tasks/${taskId}/supplement`, { method:"POST", body:JSON.stringify(payload) }),
+  autoSupplement: taskId => api(`/tasks/${taskId}/supplements:auto`, { method:"POST", body:"{}" }),
   run: payload => api("/runs", { method:"POST", body:JSON.stringify(payload) }), runChain: runId => api(`/runs/${runId}/chain`),
   review: (nodeId, payload) => api(`/nodes/${nodeId}/reviews`, { method:"POST", body:JSON.stringify(payload) }),
 };

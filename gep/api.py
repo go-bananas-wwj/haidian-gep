@@ -16,7 +16,9 @@ from .task_service import ConflictError, GepStore, SnapshotBlocked
 
 class DemoApi:
     def __init__(self, database_path: str | Path, reviewer_header: str | None = None, data_root: str | Path | None = None):
-        self.store = GepStore(database_path, supplement_workflow=DifyWorkflow.from_environment())
+        self.store = GepStore(
+            database_path, supplement_workflow=DifyWorkflow.from_environment(), auto_enqueue_on_create=True,
+        )
         self.reviewer_header = reviewer_header or os.environ.get("GEP_TRUSTED_PROXY_USER_HEADER")
         self.data_packages = DataPackageCatalog(data_root or os.environ.get("GEP_DATA_ROOT"))
 
@@ -151,6 +153,8 @@ class DemoApi:
                     return self._response(start_response, 200, {"events": self.store.events(task_id, after)})
                 if method == "POST" and parts[2:] == ["supplement"]:
                     return self._response(start_response, 202, self.store.request_supplement(task_id, **self._json_body(environ)))
+                if method == "POST" and parts[2:] == ["supplements:auto"]:
+                    return self._response(start_response, 202, self.store.enqueue_all_supplements(task_id))
                 if method == "GET" and parts[2:] == ["snapshots"]:
                     return self._response(start_response, 200, {"snapshots": self.store.snapshots(task_id)})
                 if method == "POST" and parts[2:] == ["snapshots"]:

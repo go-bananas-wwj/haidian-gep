@@ -361,6 +361,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(completed["status"], "blocked")
         self.assertIn("Dify", completed["reason"])
 
+    def test_batch_supplement_route_is_idempotent_and_never_runs_work_inline(self):
+        """Break caught: reopening a task could duplicate jobs or block the HTTP request on a model call."""
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+        before = self.app.store.connection.execute(
+            "SELECT COUNT(*) FROM supplement_jobs WHERE task_id=? AND status='queued'", (task["task_id"],)
+        ).fetchone()[0]
+
+        status, result, _ = self.request("POST", f"/tasks/{task['task_id']}/supplements:auto", {})
+        running = self.app.store.connection.execute(
+            "SELECT COUNT(*) FROM supplement_jobs WHERE task_id=? AND status='running'", (task["task_id"],)
+        ).fetchone()[0]
+
+        self.assertEqual(status, 202)
+        self.assertEqual(result["queued_count"], 0)
+        self.assertEqual(result["skipped_by_reason"]["already_scheduled"], before)
+        self.assertEqual(running, 0)
+
+    def test_batch_supplement_route_rejects_unknown_task(self):
+        status, payload, _ = self.request("POST", "/tasks/missing/supplements:auto", {})
+
+        self.assertEqual(status, 404)
+        self.assertIn("task not found", payload["error"])
+
     def test_run_endpoint_records_a_blocked_run_from_a_frozen_snapshot(self):
         """Break caught: the browser could not request the persisted run required by the task contract."""
         self.app.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)

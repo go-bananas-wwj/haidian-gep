@@ -64,13 +64,17 @@ def _utc_now() -> str:
 
 
 class GepStore:
-    def __init__(self, database_path: str | Path, supplement_workflow: SupplementWorkflow | None = None):
+    def __init__(
+        self, database_path: str | Path, supplement_workflow: SupplementWorkflow | None = None,
+        auto_enqueue_on_create: bool = False,
+    ):
         self.connection = sqlite3.connect(str(database_path))
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA busy_timeout=5000")
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.supplement_workflow = supplement_workflow or UnconfiguredSupplementWorkflow()
+        self.auto_enqueue_on_create = auto_enqueue_on_create
         self._create_schema()
 
     def close(self) -> None:
@@ -282,7 +286,10 @@ class GepStore:
                     "awaiting_agent", "unsubmitted", "pending",
                 )
         self._event(task_id, None, "task.created", {"indicator_count": len(INDICATORS), "data_version": data_version})
+        self._event(task_id, None, "graph.initialized", {"indicator_count": len(INDICATORS)})
         self.connection.commit()
+        if self.auto_enqueue_on_create:
+            self.enqueue_all_supplements(task_id)
         return {"task_id": task_id}
 
     @staticmethod
@@ -672,6 +679,64 @@ class GepStore:
             )
             self._event(task_id, node_id, "supplement.queued", {"job_id": job_id})
         return {"job_id": job_id, "status": "queued", "reason": reason}
+
+    def enqueue_all_supplements(self, task_id: str, scheduler_version: str = "auto-v1") -> dict[str, Any]:
+        """Idempotently enqueue every unresolved indicator and input node."""
+        if not scheduler_version.strip():
+            raise ValueError("scheduler_version is required")
+        graph = self.graph(task_id)
+        nodes = graph["nodes"]
+        by_key = {node["node_key"]: node for node in nodes}
+        queued_count = 0
+        skipped: dict[str, int] = {}
+
+        def skip(reason: str) -> None:
+            skipped[reason] = skipped.get(reason, 0) + 1
+
+        for node in nodes:
+            if node["kind"] not in {"indicator", "input"}:
+                continue
+            idempotency_key = f"{scheduler_version}:{task_id}:{node['node_id']}:v{node['version']}"
+            existing = self.connection.execute(
+                "SELECT 1 FROM supplement_jobs WHERE task_id=? AND node_id=? AND idempotency_key=?",
+                (task_id, node["node_id"], idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                skip("already_scheduled")
+                continue
+            if node["review_status"] == "approved":
+                skip("approved")
+                continue
+            if node["review_status"] == "pending_review" or node["acquisition_status"] == "candidate_ready":
+                skip("awaiting_review")
+                continue
+            if node["value"] is not None:
+                skip("has_value")
+                continue
+            if node["acquisition_status"] in {"agent_queued", "agent_running"}:
+                skip("active_job")
+                continue
+            if node["acquisition_status"] == "manual_required":
+                skip("manual_required")
+                continue
+            if node["kind"] == "input":
+                parent = by_key.get(node["parent_key"])
+                if parent and parent["applicability_status"] in {"not_applicable", "verified_zero"}:
+                    skip("terminal_parent")
+                    continue
+            self.request_supplement(task_id, node["node_id"], idempotency_key)
+            queued_count += 1
+
+        result = {
+            "task_id": task_id,
+            "scheduler_version": scheduler_version,
+            "queued_count": queued_count,
+            "skipped_count": sum(skipped.values()),
+            "skipped_by_reason": dict(sorted(skipped.items())),
+        }
+        with self.connection:
+            self._event(task_id, None, "supplement.auto_enqueued", result)
+        return result
 
     def supplement_job(self, job_id: str) -> dict[str, Any]:
         row = self.connection.execute("SELECT * FROM supplement_jobs WHERE job_id=?", (job_id,)).fetchone()

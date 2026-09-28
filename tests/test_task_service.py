@@ -51,6 +51,37 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(maize["evidence"]["printed_page"], 71)
         self.assertNotIn("synthetic", str(maize).lower())
 
+    def test_configured_task_creation_auto_queues_every_unresolved_node_once(self):
+        """Break caught: a completed initial graph could leave every node waiting for manual clicks."""
+        database = Path(self.directory.name) / "auto-tasks.sqlite3"
+        store = GepStore(database, auto_enqueue_on_create=True)
+        try:
+            task = store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+            graph = store.graph(task["task_id"])
+            jobs = store.connection.execute(
+                "SELECT node_id,status FROM supplement_jobs WHERE task_id=?", (task["task_id"],)
+            ).fetchall()
+            maize = next(node for node in graph["nodes"] if node["node_key"] == "P1.maize.quantity")
+            unresolved = [node for node in graph["nodes"] if node["kind"] in {"indicator", "input"} and node["node_id"] != maize["node_id"]]
+            events = store.events(task["task_id"])
+
+            self.assertEqual(len(jobs), len(unresolved))
+            self.assertTrue(all(job["status"] == "queued" for job in jobs))
+            self.assertEqual(maize["acquisition_status"], "acquired")
+            self.assertEqual({node["acquisition_status"] for node in unresolved}, {"agent_queued"})
+            self.assertIn("graph.initialized", [event["type"] for event in events])
+            self.assertIn("supplement.auto_enqueued", [event["type"] for event in events])
+
+            repeated = store.enqueue_all_supplements(task["task_id"])
+            job_count = store.connection.execute(
+                "SELECT COUNT(*) FROM supplement_jobs WHERE task_id=?", (task["task_id"],)
+            ).fetchone()[0]
+            self.assertEqual(repeated["queued_count"], 0)
+            self.assertEqual(repeated["skipped_by_reason"]["already_scheduled"], len(unresolved))
+            self.assertEqual(job_count, len(unresolved))
+        finally:
+            store.close()
+
     def test_configured_workflow_persists_a_structured_candidate_pending_review(self):
         """Break caught: a model response could be mistaken for an approved input or lose its source trail."""
         class Workflow:
