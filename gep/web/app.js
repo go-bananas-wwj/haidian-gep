@@ -95,7 +95,9 @@ async function reload() {
   $("#freeze").disabled = false; $("#execute-run").disabled = !state.snapshotId;
   if (state.selected && state.drawerMode === "indicator") openIndicatorDrawer(state.selected, state.selectedDescription, null);
   if (state.selected && state.drawerMode === "evidence") openEvidenceDrawer(state.selected, state.selectedIndicator, null);
-  await loadTasks(); await loadPackage(graph.task.data_version);
+  await loadTasks();
+  if (graph.task.data_version === "smart-data-2024-v1") { $("#data-package").hidden = true; }
+  else { await loadPackage(graph.task.data_version); }
 }
 async function loadPackage(version) {
   try { const data = await taskApi.dataVersion(version); $("#data-package").hidden = false; $("#accounting-ready").textContent = data.accounting_ready ? "通过" : "未通过"; $("#alphaearth-candidates").textContent = data.alphaearth_candidates?.length ? `${data.alphaearth_candidates.length} 项` : "未提供"; }
