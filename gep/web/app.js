@@ -25,17 +25,22 @@ async function loadTasks() {
 }
 function updateHeader(graph) {
   const pending = state.nodes.filter(node => node.review_status === "pending_review").length;
-  $("#task-state").textContent = `任务 ${graph.task.task_id.slice(0, 8)} · 图版本 ${graph.task.graph_version} · ${pending} 项待审核`;
-  $("#graph-summary").textContent = `已建立 3 类、22 项指标；当前 ${pending} 项等待人工审核`;
+  const manual = state.nodes.filter(node => node.acquisition_status === "manual_required").length;
+  const failed = state.nodes.filter(node => node.acquisition_status === "agent_failed").length;
+  const active = state.nodes.filter(node => ["agent_queued", "agent_running"].includes(node.acquisition_status)).length;
+  $("#task-state").textContent = `任务 ${graph.task.task_id.slice(0, 8)} · 图版本 ${graph.task.graph_version} · ${pending} 项待审核 · ${manual} 项待人工介入`;
+  $("#graph-summary").textContent = `已建立 3 类、22 项指标；${active} 项处理中 · ${pending} 项待审核 · ${manual} 项待人工介入 · ${failed} 项补充失败`;
+  $("#agent-title").textContent = active ? `智能体处理中 · ${active} 项` : "本轮智能体处理已停在审核闸门";
+  $("#agent-text").textContent = `${pending} 项待审核，${manual} 项待人工介入，${failed} 项补充失败；空白不会自动转为零。`;
 }
 function eventText(event) {
-  const labels = { "task.created":"创建任务图", "node.revised":"人工修正数据", "node.approved":"审核通过", "node.returned":"退回重查", "supplement.requested":"请求智能体补充", "supplement.blocked":"智能体补充受阻" };
+  const labels = { "task.created":"创建任务图", "graph.initialized":"核算图已建立", "node.revised":"人工修正数据", "node.approved":"审核通过", "node.returned":"退回重查", "supplement.auto_enqueued":"全量补充已排队", "supplement.queued":"智能体排队中", "supplement.running":"智能体补充中", "supplement.candidate_persisted":"智能体已补充·待审核", "supplement.manual_required":"待人工介入", "supplement.failed":"补充失败", "supplement.stale":"过期结果未采用", "supplement.blocked":"智能体补充受阻" };
   return labels[event.type] || event.type;
 }
-function renderEvents(events) {
+function renderEvents(events, { animate = true } = {}) {
   const target = $("#event-list"); target.replaceChildren(); if (!events.length) { target.innerHTML = "<li>暂无新增事件</li>"; return; }
   for (const event of events.slice(-8).reverse()) { const item = document.createElement("li"); item.textContent = `${eventText(event)} · ${new Date(event.created_utc).toLocaleString("zh-CN")}`; target.append(item); }
-  state.graph.animatePersisted(events);
+  if (animate) requestAnimationFrame(() => state.graph.animatePersisted(events));
 }
 async function reload() {
   if (!state.task) return;
@@ -57,8 +62,10 @@ async function pollEvents() {
   catch (error) { notice(`事件恢复失败：${error.message}`); }
 }
 function startPolling() { clearInterval(state.eventTimer); state.eventTimer = setInterval(pollEvents, 5000); pollEvents(); }
-async function openTask(task) {
-  closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null; await reload(); startPolling(); switchPage("prepare"); notice(`已恢复任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
+async function openTask(task, { playInitial = false } = {}) {
+  closeDrawer({ restoreFocus:false }); state.task = { task_id:task.task_id }; state.lastEvent = 0; state.selected = null; await reload();
+  const { events } = await taskApi.events(state.task.task_id, 0); state.lastEvent = events.at(-1)?.sequence || 0; renderEvents(events, { animate:playInitial });
+  startPolling(); switchPage("prepare"); notice(`${playInitial ? "已创建" : "已恢复"}任务 ${task.task_id.slice(0, 8)}。数据图和审核状态来自服务端持久化记录。`);
 }
 
 function drawerOpen() { return !$("#drawer-overlay").hidden; }
@@ -67,6 +74,7 @@ function showDrawer(trigger) {
   const overlay = $("#drawer-overlay"); const drawer = $("#detail-drawer");
   overlay.hidden = false; drawer.setAttribute("aria-hidden", "false");
   requestAnimationFrame(() => { overlay.classList.add("open"); drawer.classList.add("open"); $("#close-drawer").focus(); });
+  setTimeout(() => state.graph?.layoutEdges(), 190);
 }
 function closeDrawer({ restoreFocus = true } = {}) {
   const overlay = $("#drawer-overlay"); const drawer = $("#detail-drawer");
@@ -74,6 +82,7 @@ function closeDrawer({ restoreFocus = true } = {}) {
   overlay.classList.remove("open"); drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true");
   state.selected = null; state.selectedIndicator = null; state.drawerMode = null;
   setTimeout(() => { if (!drawer.classList.contains("open")) overlay.hidden = true; }, 180);
+  setTimeout(() => state.graph?.layoutEdges(), 190);
   if (restoreFocus && lastDrawerTrigger?.isConnected) lastDrawerTrigger.focus();
   lastDrawerTrigger = null;
 }
@@ -139,7 +148,7 @@ function renderRun(run, chain) { const calculation = chain.calculation || {}; co
 async function executeRun() { try { const run = await taskApi.run({ snapshot_id:state.snapshotId, idempotency_key:`web-${crypto.randomUUID()}` }); renderRun(run, await taskApi.runChain(run.run_id)); notice(run.status === "succeeded" ? "核算完成；请在结果与交付中查看总账。" : "已保存受阻运行与分项记录；系统没有生成不完整总 GEP。"); } catch (error) { notice(`执行失败：${error.message}`); } }
 async function loadAppendix() { if (!state.task) return; try { const appendix = await taskApi.appendix(state.task.task_id); state.appendix = appendix; renderMap($("#map-panel"), appendix); $("#ledger-panel").innerHTML = `<h2>区级总账</h2><p>正式 GEP：${appendix.formal_gep_value === null ? "尚未生成" : `${appendix.formal_gep_value} 元`}</p><p class="muted">非空间总账与空间图层分别显示，避免以未验证的栅格代替区级核算。</p>`; const rows = appendix.rows.map(row => `<tr><td>${row.indicator_id}</td><td>${escape(row.label)}</td><td class="${row.status === "blocked" ? "status-blocked" : "status-ready"}">${row.status === "blocked" ? `阻断 ${row.blocking_nodes.length}` : "可运行"}</td><td>${row.input_nodes.length}</td></tr>`).join(""); $("#appendix-panel").innerHTML = `<h2>附录 E：输入完整性</h2><table class="appendix-table"><thead><tr><th>指标</th><th>名称</th><th>状态</th><th>输入数</th></tr></thead><tbody>${rows}</tbody></table>`; } catch (error) { $("#appendix-panel").textContent = `读取附录 E 失败：${error.message}`; } }
 
-$("#task-form").addEventListener("submit", async event => { event.preventDefault(); try { const task = await taskApi.create({ region_code:"110108", year:2024, boundary_version:$("#boundary").value, standard_version:"GB/T 46869-2025", data_version:$("#data-version").value }); await openTask(task); } catch (error) { notice(`创建任务失败：${error.message}`); } });
+$("#task-form").addEventListener("submit", async event => { event.preventDefault(); try { const task = await taskApi.create({ region_code:"110108", year:2024, boundary_version:$("#boundary").value, standard_version:"GB/T 46869-2025", data_version:$("#data-version").value }); await openTask(task, { playInitial:true }); } catch (error) { notice(`创建任务失败：${error.message}`); } });
 for (const button of document.querySelectorAll(".step")) button.onclick = () => switchPage(button.dataset.page);
 $("#zoom-in").onclick = () => { state.graph.setZoom(.1); $("#zoom-value").textContent = `${Math.round(state.graph.zoom * 100)}%`; }; $("#zoom-out").onclick = () => { state.graph.setZoom(-.1); $("#zoom-value").textContent = `${Math.round(state.graph.zoom * 100)}%`; }; $("#collapse-all").onclick = () => state.graph.setCollapsed(true); $("#expand-all").onclick = () => state.graph.setCollapsed(false);
 $("#close-drawer").onclick = () => closeDrawer(); $("#drawer-overlay").onclick = event => { if (event.target === $("#drawer-overlay")) closeDrawer(); }; $("#drawer-back").onclick = () => { if (state.selectedIndicator) openIndicatorDrawer(state.selectedIndicator, state.selectedDescription, null); };

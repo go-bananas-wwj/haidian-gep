@@ -98,6 +98,15 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("agent_running", page)
         self.assertIn("智能体补充中", page)
 
+    def test_canvas_flow_is_tied_to_persisted_event_types(self):
+        """Break caught: a looping animation could imply work that never happened."""
+        graph = (Path(__file__).parents[1] / "gep" / "web" / "graph.js").read_text(encoding="utf-8")
+
+        self.assertIn("animatePersisted", graph)
+        self.assertIn("supplement.running", graph)
+        self.assertIn("supplement.manual_required", graph)
+        self.assertNotIn("setInterval", graph)
+
 
 if __name__ == "__main__":
     unittest.main()

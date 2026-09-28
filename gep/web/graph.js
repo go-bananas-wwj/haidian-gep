@@ -1,6 +1,11 @@
 const CATEGORIES = [
   ["material", "物质产品", "7 个科目"], ["regulating", "调节服务", "12 个科目"], ["cultural", "文化服务", "3 个科目"],
 ];
+const SVG_NS = "http://www.w3.org/2000/svg";
+const FLOW_EVENTS = new Set([
+  "graph.initialized", "supplement.queued", "supplement.running", "supplement.candidate_persisted",
+  "supplement.manual_required", "supplement.failed", "supplement.stale",
+]);
 
 // The graph is fixed by GB/T 46869-2025.  Server nodes supply current state,
 // values and evidence; this catalogue supplies only the stable visual hierarchy.
@@ -31,17 +36,23 @@ function readableField(node) {
 
 export function nodeState(node) {
   if (node.review_status === "approved") return ["审核通过", "approved"];
-  if (node.review_status === "pending_review") return ["智能体已补充·待审核", ""];
-  if (node.acquisition_status === "agent_running" || node.acquisition_status === "agent_queued") return ["智能体补充中", "running"];
-  if (node.acquisition_status === "returned") return ["退回重查", ""];
-  if (node.acquisition_status === "awaiting_agent") return ["待智能体补充", ""];
-  return ["待人工协助", ""];
+  if (node.review_status === "returned") return ["退回重查", "returned"];
+  if (node.review_status === "pending_review" && node.evidence?.corrections?.length) return ["人工已修正·待审核", "review"];
+  if (node.review_status === "pending_review") return ["智能体已补充·待审核", "review"];
+  if (node.acquisition_status === "agent_queued") return ["智能体排队中", "queued"];
+  if (node.acquisition_status === "agent_running") return ["智能体补充中", "running"];
+  if (node.acquisition_status === "manual_required") return ["待人工介入", "manual"];
+  if (node.acquisition_status === "agent_failed") return ["补充失败·可重试", "failed"];
+  if (node.acquisition_status === "awaiting_agent") return ["待智能体补充", "waiting"];
+  return ["待人工介入", "manual"];
 }
 
 export class GepGraph {
   constructor(container, { onNode, onDetail } = {}) {
     this.container = container; this.onNode = onNode; this.onDetail = onDetail;
-    this.zoom = 1; this.collapsed = {}; this.nodes = []; this.taskId = null;
+    this.zoom = 1; this.collapsed = {}; this.nodes = []; this.taskId = null; this.edgeLayer = null; this.stage = null;
+    this.resizeTimer = null;
+    window.addEventListener("resize", () => { clearTimeout(this.resizeTimer); this.resizeTimer = setTimeout(() => this.layoutEdges(), 100); });
   }
   storageKey() { return this.taskId ? `haidian-gep:view-layout:${this.taskId}` : ""; }
   loadView(taskId) {
@@ -53,13 +64,15 @@ export class GepGraph {
   setCollapsed(all) { for (const [key] of CATEGORIES) this.collapsed[key] = all; this.saveView(); this.render(); }
   render(nodes = this.nodes) {
     this.nodes = nodes; const byKey = new Map(nodes.map(node => [node.node_key, node]));
+    const stage = document.createElement("div"); stage.className = "graph-stage";
+    const edgeLayer = document.createElementNS(SVG_NS, "svg"); edgeLayer.classList.add("edge-layer"); edgeLayer.setAttribute("aria-hidden", "true");
     const scale = document.createElement("div"); scale.className = "graph-scale"; scale.style.transform = `scale(${this.zoom})`;
     const root = document.createElement("div"); root.className = "graph-root";
-    root.innerHTML = '<span class="root-node"><strong>GEP 年度核算</strong><small>物质产品 + 调节服务 + 文化服务</small></span>'; scale.append(root);
+    root.innerHTML = '<span class="root-node" data-node="root"><strong>GEP 年度核算</strong><small>物质产品 + 调节服务 + 文化服务</small></span>'; scale.append(root);
     const grid = document.createElement("div"); grid.className = "category-grid";
     for (const [category, title, count] of CATEGORIES) {
       const card = document.createElement("section"); card.className = "category";
-      const head = document.createElement("div"); head.className = "category-head";
+      const head = document.createElement("div"); head.className = "category-head"; head.dataset.category = category;
       const fold = document.createElement("button"); fold.textContent = this.collapsed[category] ? "展开" : "折叠"; fold.onclick = () => { this.collapsed[category] = !this.collapsed[category]; this.saveView(); this.render(); };
       const titleNode = document.createElement("span"); titleNode.textContent = title;
       const countNode = document.createElement("small"); countNode.textContent = count;
@@ -78,14 +91,53 @@ export class GepGraph {
       }
       grid.append(card);
     }
-    scale.append(grid); this.container.replaceChildren(scale);
+    scale.append(grid); stage.append(edgeLayer, scale); this.container.replaceChildren(stage);
+    this.stage = stage; this.edgeLayer = edgeLayer; requestAnimationFrame(() => this.layoutEdges());
+  }
+  layoutEdges() {
+    if (!this.stage || !this.edgeLayer) return;
+    const stageRect = this.stage.getBoundingClientRect();
+    const point = (element, side) => {
+      const rect = element.getBoundingClientRect();
+      return { x:rect.left - stageRect.left + rect.width / 2, y:(side === "top" ? rect.top : rect.bottom) - stageRect.top };
+    };
+    const root = this.stage.querySelector('[data-node="root"]'); if (!root) return;
+    const paths = [];
+    const addPath = (id, start, end) => {
+      const path = document.createElementNS(SVG_NS, "path"); const middle = start.y + Math.max(18, (end.y - start.y) * .45);
+      path.classList.add("edge-path"); path.dataset.edge = id;
+      path.setAttribute("d", `M ${start.x} ${start.y} C ${start.x} ${middle}, ${end.x} ${middle}, ${end.x} ${end.y}`); paths.push(path);
+    };
+    for (const [category] of CATEGORIES) {
+      const head = this.stage.querySelector(`[data-category="${category}"]`); if (!head) continue;
+      addPath(`root:${category}`, point(root, "bottom"), point(head, "top"));
+      for (const [key, , group] of INDICATORS.filter(row => row[2] === category)) {
+        const indicator = this.stage.querySelector(`[data-node="${key}"]`); if (!indicator) continue;
+        addPath(`${category}:${key}`, point(head, "bottom"), point(indicator, "top"));
+      }
+    }
+    const width = Math.max(this.stage.scrollWidth, this.container.clientWidth); const height = Math.max(this.stage.scrollHeight, this.container.clientHeight);
+    this.edgeLayer.setAttribute("viewBox", `0 0 ${width} ${height}`); this.edgeLayer.setAttribute("width", width); this.edgeLayer.setAttribute("height", height);
+    this.edgeLayer.replaceChildren(...paths);
   }
   animatePersisted(events) {
+    const edgeIds = new Set();
     for (const event of events) {
+      if (!FLOW_EVENTS.has(event.type)) continue;
+      if (event.type === "graph.initialized") { for (const [category] of CATEGORIES) edgeIds.add(`root:${category}`); continue; }
       if (!event.node_id) continue;
       const node = this.nodes.find(item => item.node_id === event.node_id); if (!node) continue;
-      const element = this.container.querySelector(`[data-node="${node.parent_key || node.node_key}"]`);
+      const indicatorKey = node.kind === "indicator" ? node.node_key : node.parent_key;
+      const indicator = INDICATORS.find(([key]) => key === indicatorKey); if (!indicator) continue;
+      edgeIds.add(`${indicator[2]}:${indicatorKey}`);
+      const element = this.container.querySelector(`[data-node="${indicatorKey}"]`);
       if (element) { element.classList.remove("node-flow"); requestAnimationFrame(() => element.classList.add("node-flow")); }
+    }
+    let delay = 0;
+    for (const edgeId of edgeIds) {
+      const edge = this.edgeLayer?.querySelector(`[data-edge="${edgeId}"]`); if (!edge) continue;
+      setTimeout(() => { edge.classList.remove("flowing"); void edge.getBoundingClientRect(); edge.classList.add("flowing"); }, delay);
+      delay += 70;
     }
   }
   // 产品详情以可折叠的鱼骨式树呈现：对象目录 → 具体产品 → 可审核字段。

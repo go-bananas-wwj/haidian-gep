@@ -92,6 +92,37 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn('event.key === "Escape"', app)
         self.assertIn("lastDrawerTrigger", app)
 
+    def test_persisted_events_flow_along_svg_edges(self):
+        """Break caught: progress could be represented by a generic card flash instead of its real dependency path."""
+        graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
+        styles = (WEB_ROOT / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("createElementNS", graph)
+        self.assertIn("edge-layer", graph)
+        self.assertIn("layoutEdges", graph)
+        self.assertIn("root:${category}", graph)
+        self.assertIn("${category}:${key}", graph)
+        for event_type in (
+            "graph.initialized", "supplement.queued", "supplement.running",
+            "supplement.candidate_persisted", "supplement.manual_required",
+            "supplement.failed", "supplement.stale",
+        ):
+            self.assertIn(event_type, graph)
+        self.assertIn("if (!edge) continue", graph)
+        self.assertIn("stroke-dashoffset", styles)
+        self.assertIn("@keyframes edge-flow", styles)
+        self.assertIn("prefers-reduced-motion", styles)
+
+    def test_all_agent_terminal_and_progress_states_are_distinct(self):
+        """Break caught: queued, failed, or manual nodes could all look like generic pending work."""
+        graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        for label in ("智能体排队中", "智能体补充中", "智能体已补充·待审核", "待人工介入", "补充失败·可重试", "退回重查", "审核通过"):
+            self.assertIn(label, graph)
+        for summary in ("待审核", "待人工介入", "补充失败", "处理中"):
+            self.assertIn(summary, app)
+
 
 if __name__ == "__main__":
     unittest.main()
