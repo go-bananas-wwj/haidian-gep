@@ -72,7 +72,8 @@ class SmartDataStore:
     @staticmethod
     def _asset_row(row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
-        result["bbox"] = json.loads(result.pop("bbox_json")) if result["bbox_json"] is not None else None
+        bbox_json = result.pop("bbox_json")
+        result["bbox"] = json.loads(bbox_json) if bbox_json is not None else None
         result["quality"] = json.loads(result.pop("quality_json"))
         return result
 

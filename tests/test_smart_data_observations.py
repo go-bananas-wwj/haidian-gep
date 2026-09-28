@@ -112,11 +112,24 @@ class SmartDataObservationBuilderTests(unittest.TestCase):
         )
 
         self.assertEqual([item.spatial_grain for item in observations], [
-            "worldcover_class_10", "worldcover_class_50", "worldcover_class_80",
+            "green_ecosystem_total", "worldcover_class_10", "worldcover_class_50", "worldcover_class_80",
         ])
-        self.assertEqual([item.value for item in observations], [0.03, 0.01, 0.01])
-        self.assertAlmostEqual(sum(item.value for item in observations), 5 * 0.01, delta=0.01)
+        self.assertEqual([item.value for item in observations], [0.03, 0.03, 0.01, 0.01])
+        self.assertAlmostEqual(sum(item.value for item in observations[1:]), 5 * 0.01, delta=0.01)
         self.assertEqual({item.evidence_class for item in observations}, {"model_estimate"})
+
+    def test_geographic_cover_is_reprojected_to_metric_area_and_emits_green_total(self):
+        cover = self.write_raster("cover-geographic.tif", [[10,10],[50,80]], dtype="uint8", nodata=0,
+                                  transform=from_origin(116.2,40.0,.0001,.0001))
+        # Rewrite CRS to the actual geographic source contract.
+        with rasterio.open(cover,"r+") as dataset: dataset.crs="EPSG:4326"
+        observations = build_cover_observations(cover,asset_id="worldcover",year=2024,region_code="110108")
+        total = next(item for item in observations if item.metric=="ecosystem_area")
+        classes = [item for item in observations if item.metric=="ecosystem_area_class"]
+        self.assertGreater(total.value,.01)
+        self.assertLess(total.value,.10)
+        self.assertEqual(total.spatial_grain,"green_ecosystem_total")
+        self.assertEqual(len(classes),3)
 
     def test_wrong_year_missing_sources_and_nonfinite_rasters_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "unsupported_year"):
@@ -147,7 +160,7 @@ class SmartDataObservationBuilderTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["observation_count"], 10)
+        self.assertEqual(payload["observation_count"], 11)
         observations = json.loads(output.read_text())
         self.assertIn("precipitation", {item["metric"] for item in observations})
         self.assertIn("actual_et", {item["metric"] for item in observations})
@@ -155,7 +168,7 @@ class SmartDataObservationBuilderTests(unittest.TestCase):
         self.assertTrue(all(not Path(item["artifact_path"]).is_absolute() for item in observations if item.get("artifact_path")))
 
         loaded = load_observation_manifest(output)
-        self.assertEqual(len(loaded), 10)
+        self.assertEqual(len(loaded), 11)
         self.assertEqual(loaded[0].year, 2024)
 
 

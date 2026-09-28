@@ -100,6 +100,7 @@ def build_modis_observations(
     try:
         import numpy as np
         import rasterio
+        from rasterio.warp import Resampling, calculate_default_transform, reproject
     except ImportError as error:
         raise RuntimeError("numpy and rasterio are required") from error
     with rasterio.open(npp) as source, rasterio.open(npp_qc) as quality:
@@ -167,24 +168,40 @@ def build_terrain_observations(
 
 
 def build_cover_observations(
-    cover_path: Path, *, asset_id: str, year: int = 2024, region_code: str = "110108",
+    cover_path: Path, *, asset_id: str, year: int = 2024, region_code: str = "110108", boundary_path: Path | None = None,
 ) -> list[ObservationRecord]:
     _require_2024(year); path = _require_file(cover_path)
     try:
         import numpy as np
         import rasterio
+        from rasterio.features import geometry_mask
+        from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_geom
     except ImportError as error:
         raise RuntimeError("numpy and rasterio are required") from error
     with rasterio.open(path) as source:
-        values = source.read(1)
-        valid = np.isfinite(values) & (values != source.nodata) & (values > 0)
+        target_crs=source.crs
+        if source.crs and source.crs.is_geographic:
+            transform,width,height=calculate_default_transform(source.crs,"EPSG:32650",source.width,source.height,*source.bounds,resolution=10)
+            values=np.zeros((height,width),dtype=source.dtypes[0])
+            reproject(source=source.read(1),destination=values,src_transform=source.transform,src_crs=source.crs,
+                      dst_transform=transform,dst_crs="EPSG:32650",src_nodata=source.nodata,dst_nodata=0,resampling=Resampling.nearest)
+            nodata=0
+            target_crs="EPSG:32650"
+        else:
+            values = source.read(1); transform=source.transform; nodata=source.nodata
+        valid = np.isfinite(values) & (values != nodata) & (values > 0)
+        if boundary_path is not None:
+            from .aef_pipeline import load_boundary_descriptor
+            boundary=load_boundary_descriptor(Path(boundary_path))
+            geometry=transform_geom(boundary["crs"],target_crs,boundary["geometry"],precision=7)
+            valid &= geometry_mask([geometry],out_shape=values.shape,transform=transform,invert=True)
         if not valid.any(): raise ValueError("no_finite_raster_values:cover")
-        pixel_area = abs(source.transform.a * source.transform.e) / 10000.0
+        pixel_area = abs(transform.a * transform.e) / 10000.0
     result = []
     codes, counts = np.unique(values[valid].astype("int32"), return_counts=True)
     for code, count in zip(codes, counts):
         result.append(_observation(
-            observation_id=f"worldcover-{year}-area-{int(code)}", metric="ecosystem_area",
+            observation_id=f"worldcover-{year}-class-area-{int(code)}-v2", metric="ecosystem_area_class",
             value=round(float(count) * pixel_area, 10), unit="hm2", region_code=region_code, year=year,
             spatial_grain=f"worldcover_class_{int(code)}", method_id="worldcover.pixel_area",
             asset_ids=(asset_id,), confidence=0.65,
@@ -192,4 +209,10 @@ def build_cover_observations(
                          "boundary_status": "unconfirmed_osm_demo_boundary"},
             evidence_class="model_estimate", artifact=path,
         ))
+    green_area=sum(item.value for item in result if int(item.uncertainty["class_code"]) in {10,20,30,40,90,95,100})
+    result.insert(0,_observation(
+        observation_id=f"worldcover-{year}-green-area-v2",metric="ecosystem_area",value=green_area,unit="hm2",
+        region_code=region_code,year=year,spatial_grain="green_ecosystem_total",method_id="worldcover.green_area.v2",
+        asset_ids=(asset_id,),confidence=.66,uncertainty={"included_classes":[10,20,30,40,90,95,100],
+        "source_year":2021,"boundary_status":"unconfirmed_osm_demo_boundary"},evidence_class="model_estimate",artifact=path))
     return result

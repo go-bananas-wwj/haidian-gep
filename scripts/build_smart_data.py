@@ -40,6 +40,7 @@ def main() -> None:
     observations.add_argument("--output", required=True)
     observations.add_argument("--region-code", default="110108")
     observations.add_argument("--year", type=int, default=2024)
+    observations.add_argument("--boundary")
     args = parser.parse_args()
     if args.stage == "aef":
         root = Path(args.data_root)
@@ -93,7 +94,8 @@ def main() -> None:
             *build_terrain_observations(dem, asset_ids=[asset_id(path, f"dem-{number}") for number, path in enumerate(dem)],
                                         year=args.year, region_code=args.region_code),
             *build_cover_observations(covers[0], asset_id=asset_id(covers[0], "worldcover-2021"),
-                                      year=args.year, region_code=args.region_code),
+                                      year=args.year, region_code=args.region_code,
+                                      boundary_path=Path(args.boundary) if args.boundary else None),
         ]
         records=[]
         for item in built:

@@ -110,6 +110,12 @@ class SmartDataStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(SmartDataConflictError, "asset version is immutable"):
             self.store.smart_data.register_asset(changed)
 
+    def test_asset_with_null_bbox_is_idempotent(self):
+        payload=asset_payload("null-bbox"); payload["bbox"]=None
+        asset=AssetRecord.from_dict(payload)
+        self.store.smart_data.register_asset(asset)
+        self.assertEqual(self.store.smart_data.register_asset(asset)["bbox"],None)
+
     def test_old_database_migrates_without_losing_tasks(self):
         self.store.close()
         with sqlite3.connect(self.database) as connection:
