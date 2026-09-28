@@ -21,14 +21,22 @@ class DeploymentConfigTests(unittest.TestCase):
             api_section,
         )
 
-    def test_api_accepts_dify_configuration_only_from_runtime_environment(self):
-        """Break caught: a real workflow could not be enabled, or a credential could be committed into Compose."""
+    def test_model_credentials_are_available_only_to_the_worker(self):
+        """Break caught: the API or Web container could receive a model credential it never needs."""
         compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
-        api_section, _ = compose.split("  task-web:", 1)
+        api_section = compose.split("  task-api:", 1)[1].split("  task-worker:", 1)[0]
+        worker_section = compose.split("  task-worker:", 1)[1].split("  task-web:", 1)[0]
 
-        self.assertIn("DIFY_API_BASE_URL: ${DIFY_API_BASE_URL:-}", api_section)
-        self.assertIn("DIFY_API_KEY: ${DIFY_API_KEY:-}", api_section)
-        self.assertNotIn("DIFY_API_KEY: sk-", api_section)
+        self.assertNotIn("DEEPSEEK_API_KEY", api_section)
+        self.assertNotIn("DIFY_API_KEY", api_section)
+        for name in (
+            "SUPPLEMENT_PROVIDER", "DEEPSEEK_API_BASE_URL", "DEEPSEEK_API_KEY",
+            "DEEPSEEK_MODEL", "DEEPSEEK_TIMEOUT_SECONDS",
+        ):
+            self.assertIn(name, worker_section)
+        self.assertIn("DIFY_API_BASE_URL: ${DIFY_API_BASE_URL:-}", worker_section)
+        self.assertIn("DIFY_API_KEY: ${DIFY_API_KEY:-}", worker_section)
+        self.assertNotRegex(compose, r"(?i)(api_key|token):\s+sk-[A-Za-z0-9]")
 
     def test_worker_uses_the_same_persistent_runtime_without_publishing_a_port(self):
         """Break caught: an agent request could run in the API process or a second worker could get its own state."""

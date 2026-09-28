@@ -20,7 +20,35 @@ API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0
 
 编排文件会先等待 API 的 `/health` 成功，再启动 Web 代理。单服务重建期间可短暂返回 `502`；探测与发布脚本应采用带重试的健康检查，而不是把该启动窗口误判为故障。
 
-## Dify
+## 智能体补充提供方
+
+当前 Demo 使用 DeepSeek 直连适配器进行真实联调，Dify 继续作为可选编排适配器保留。只有 `task-worker` 接收模型配置；API 和 Web 容器不需要、也不会取得模型密钥。两种提供方都只返回带证据的候选或人工介入结论，不能审核节点或执行正式 GEP 计算。
+
+在宿主机运行目录创建权限为 `0600` 的环境文件，例如 `/data/wwj/haidian-gep/runtime/deepseek.env`。通过不回显的交互输入写入 `DEEPSEEK_API_KEY`，并设置：
+
+```text
+SUPPLEMENT_PROVIDER=deepseek
+DEEPSEEK_API_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-flash
+DEEPSEEK_TIMEOUT_SECONDS=30
+```
+
+密钥不得出现在 shell 历史、Compose 文件、Git、镜像层、SQLite、事件、静态资源、截图或导出包中。启动前只核验变量是否存在和文件权限，不打印变量值；部署后以仅报告文件名/计数的扫描方式检查容器配置、应用日志、运行数据库和静态资源。DeepSeek 返回的来源 ID 与 SHA-256 必须匹配当前工作单的准入证据，否则 worker 拒绝候选。没有匹配证据时节点进入“待人工介入”，不会调用模型填零。
+
+启动时在受限会话中加载该文件，再运行 Compose：
+
+```bash
+set -a
+. /data/wwj/haidian-gep/runtime/deepseek.env
+set +a
+GEP_RUNTIME_DIR=/data/wwj/haidian-gep/runtime GEP_DATA_DIR=/data/wwj/haidian-gep/data \
+  docker compose -f compose.demo.yml up -d --build
+curl --fail http://127.0.0.1:9088/api/health
+```
+
+升级前运行 `backup.sh` 备份 SQLite、审核事件和运行产物，将新代码解压到独立 release 目录后再重建服务。健康检查、任务恢复、worker 队列和浏览器验收任一失败时，切回前一 release 目录并还原对应运行时备份。
+
+### 可选 Dify 编排
 
 按详细方案 §12.1 下载并冻结 Dify 官方、完整 Docker Compose 配置及镜像摘要，独立部署在内部网络。配置真实模型后，业务服务才可调用其工作流。未配置时，本服务会将补充请求保留为 `blocked`，绝不生成模拟候选或“已补充”状态。
 
