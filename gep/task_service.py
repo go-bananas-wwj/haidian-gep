@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from typing import Any, Protocol
 from .methods import method_cards
 from .runs import evaluate_frozen_graph
 from .smart_data import SmartDataStore
+from .smart_data.workflow import SmartDataWorkflow
 
 
 INDICATORS = (
@@ -67,7 +69,7 @@ def _utc_now() -> str:
 class GepStore:
     def __init__(
         self, database_path: str | Path, supplement_workflow: SupplementWorkflow | None = None,
-        auto_enqueue_on_create: bool = False,
+        auto_enqueue_on_create: bool = False, smart_data_enabled: bool | None = None,
     ):
         self.connection = sqlite3.connect(str(database_path))
         self.connection.row_factory = sqlite3.Row
@@ -76,8 +78,12 @@ class GepStore:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.supplement_workflow = supplement_workflow or UnconfiguredSupplementWorkflow()
         self.auto_enqueue_on_create = auto_enqueue_on_create
+        self.smart_data_enabled = (os.environ.get("GEP_SMART_DATA_ENABLED", "").lower() in {"1", "true", "yes"}
+                                   if smart_data_enabled is None else smart_data_enabled)
         self._create_schema()
         self.smart_data = SmartDataStore(self.connection)
+        if self.smart_data_enabled:
+            self.supplement_workflow = SmartDataWorkflow(self.smart_data, self.supplement_workflow)
 
     def close(self) -> None:
         self.connection.close()
@@ -699,6 +705,7 @@ class GepStore:
                 "reason_code": reason_code.strip(),
                 "explanation": explanation.strip(),
                 "searched_tools": list(payload.get("searched_tools") or []),
+                "result_class": str(payload.get("result_class") or "needs_business_decision"),
             }
         if outcome == "research_complete":
             searched_tools = payload.get("searched_tools")
@@ -754,6 +761,8 @@ class GepStore:
             "unit": unit.strip(),
             "explanation": explanation.strip(),
             "evidence": evidence,
+            "result_class": str(payload.get("result_class") or "suggested_review"),
+            "demo_auto_adopt": bool(payload.get("auto_adopt")),
         }
 
     @staticmethod
@@ -791,6 +800,8 @@ class GepStore:
             "year": task["year"],
             "boundary_version": task["boundary_version"],
             "data_version": task["data_version"],
+            "node_version": node["version"],
+            "target_metric": node["label"],
         }
 
     def request_supplement(self, task_id: str, node_id: str, idempotency_key: str) -> dict[str, str]:
@@ -829,12 +840,16 @@ class GepStore:
         by_key = {node["node_key"]: node for node in nodes}
         queued_count = 0
         skipped: dict[str, int] = {}
+        smart_task = self.smart_data_enabled and graph["task"]["data_version"] == "smart-data-2024-v1"
 
         def skip(reason: str) -> None:
             skipped[reason] = skipped.get(reason, 0) + 1
 
         for node in nodes:
             if node["kind"] not in {"indicator", "input"}:
+                continue
+            if smart_task and node["kind"] == "indicator":
+                skip("aggregate_indicator")
                 continue
             idempotency_key = f"{scheduler_version}:{task_id}:{node['node_id']}:v{node['version']}"
             existing = self.connection.execute(
@@ -888,6 +903,19 @@ class GepStore:
         if row is None:
             raise KeyError("supplement job not found")
         return dict(row)
+
+    def indicator_progress(self, task_id: str) -> dict[str, dict[str, Any]]:
+        """Summarize input readiness without treating indicator containers as missing data."""
+        nodes = self.graph(task_id)["nodes"]
+        result = {}
+        for indicator_id, _label, _category in INDICATORS:
+            inputs = [node for node in nodes if node["kind"] == "input" and node["parent_key"] == indicator_id]
+            prepared = sum(node["value"] is not None for node in inputs)
+            active = sum(node["acquisition_status"] in {"agent_queued", "agent_running"} for node in inputs)
+            manual = sum(node["acquisition_status"] == "manual_required" for node in inputs)
+            status = "ready" if prepared == len(inputs) else ("in_progress" if active else "needs_input")
+            result[indicator_id] = {"total":len(inputs), "prepared":prepared, "active":active, "manual":manual, "status":status}
+        return result
 
     def _requeue_interrupted_supplements(self) -> None:
         """Return abandoned running jobs to the durable queue after a worker interruption."""
@@ -981,6 +1009,7 @@ class GepStore:
                 "explanation": candidate["explanation"],
                 "searched_tools": candidate.get("searched_tools", []),
                 "result_type": "manual_required",
+                "result_class": candidate.get("result_class", "needs_business_decision"),
                 "received_utc": _utc_now(),
             }
             combined_evidence = {"original": current_evidence, "current": manual_evidence}
@@ -1048,6 +1077,8 @@ class GepStore:
             "searched_tools": candidate.get("searched_tools", []),
             "aef_result": candidate.get("aef_result"),
             "result_type": "agent_candidate",
+            "result_class": candidate.get("result_class", "suggested_review"),
+            "demo_auto_adopt": candidate.get("demo_auto_adopt", False),
             "received_utc": _utc_now(),
         }
         combined_evidence = {"original": current_evidence, "current": candidate_evidence}
