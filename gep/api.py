@@ -155,6 +155,17 @@ class DemoApi:
                     return self._response(start_response, 202, self.store.request_supplement(task_id, **self._json_body(environ)))
                 if method == "POST" and parts[2:] == ["supplements:auto"]:
                     return self._response(start_response, 202, self.store.enqueue_all_supplements(task_id))
+                if method == "GET" and parts[2:] == ["batch-review-preview"]:
+                    return self._response(start_response, 200, self.store.batch_review_preview(task_id))
+                if method == "POST" and parts[2:] == ["batch-reviews"]:
+                    body = self._json_body(environ)
+                    reviewer = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
+                    if not reviewer:
+                        return self._response(start_response, 503, {"error": "trusted reviewer identity is not configured"})
+                    body.pop("reviewer", None)
+                    result = self.store.create_batch_review(task_id, reviewer=reviewer, **body)
+                    status = 201 if result["status"] == "approved" else 200
+                    return self._response(start_response, status, result)
                 if method == "GET" and parts[2:] == ["snapshots"]:
                     return self._response(start_response, 200, {"snapshots": self.store.snapshots(task_id)})
                 if method == "POST" and parts[2:] == ["snapshots"]:

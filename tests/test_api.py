@@ -387,6 +387,44 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertIn("task not found", payload["error"])
 
+    def test_batch_review_preview_and_confirm_use_trusted_actor(self):
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+        node = self.app.store.node(task["task_id"], "P1.maize.producer_price")
+        self.app.store.connection.execute(
+            "UPDATE nodes SET value_json='2100',unit='yuan/t',acquisition_status='candidate_ready',review_status='auto_verified',evidence_json=? WHERE node_id=?",
+            (json.dumps({"current": {"risk_tier": "A"}}), node["node_id"]),
+        )
+        self.app.store.connection.commit()
+
+        preview_status, preview, _ = self.request("GET", f"/tasks/{task['task_id']}/batch-review-preview")
+        confirm_status, confirmed, _ = self.request("POST", f"/tasks/{task['task_id']}/batch-reviews", {
+            "expected_graph_version": preview["graph_version"], "ignore_individual_review": True,
+            "reviewer": "forged-client", "note": "batch checked",
+        }, actor="verified-batch-reviewer")
+
+        self.assertEqual(preview_status, 200)
+        self.assertEqual(confirm_status, 201)
+        self.assertEqual(confirmed["reviewer"], "verified-batch-reviewer")
+        self.assertNotEqual(confirmed["reviewer"], "forged-client")
+
+    def test_batch_review_cancel_returns_queue_without_mutation(self):
+        _, task, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "b1",
+            "standard_version": "GB/T 46869-2025", "data_version": "reference-2024-v0.1",
+        })
+        _, preview, _ = self.request("GET", f"/tasks/{task['task_id']}/batch-review-preview")
+
+        status, result, _ = self.request("POST", f"/tasks/{task['task_id']}/batch-reviews", {
+            "expected_graph_version": preview["graph_version"], "ignore_individual_review": False,
+            "note": "review one by one",
+        }, actor="verified-batch-reviewer")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "individual_review_required")
+
     def test_run_endpoint_records_a_blocked_run_from_a_frozen_snapshot(self):
         """Break caught: the browser could not request the persisted run required by the task contract."""
         self.app.store.register_data_admission("audited-2024-v1", "a" * 64, accepted=True)

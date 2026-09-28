@@ -322,6 +322,81 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(expert["acquisition_status"], "manual_required")
         self.assertGreater(result["queued_count"], 0)
 
+    def _prepare_batch_review_states(self, task_id):
+        states = {
+            "P1.maize.producer_price": ("candidate_ready", "auto_verified", "A"),
+            "P1.maize.intermediate_cost": ("candidate_ready", "pending_review", "B"),
+            "R1.precipitation": ("research_complete", "unsubmitted", "GAP"),
+            "R1.surface_runoff": ("manual_required", "unsubmitted", "C"),
+        }
+        for node_key, (acquisition, review, tier) in states.items():
+            node = self.store.node(task_id, node_key)
+            evidence_json = json.dumps({"current": {"risk_tier": tier, "result_type": "test"}})
+            value_json = "1" if tier in {"A", "B"} else None
+            self.store.connection.execute(
+                "UPDATE nodes SET acquisition_status=?,review_status=?,evidence_json=?,value_json=?,unit='test-unit' WHERE node_id=?",
+                (acquisition, review, evidence_json, value_json, node["node_id"]),
+            )
+        self.store.connection.commit()
+
+    def test_batch_review_preview_separates_reviewable_and_hard_blockers(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        self._prepare_batch_review_states(task["task_id"])
+
+        preview = self.store.batch_review_preview(task["task_id"])
+
+        self.assertIn("P1.maize.producer_price", preview["auto_ready_nodes"])
+        self.assertIn("P1.maize.intermediate_cost", preview["review_ready_nodes"])
+        self.assertIn("R1.precipitation", preview["research_gap_nodes"])
+        self.assertIn("R1.surface_runoff", preview["expert_intervention_nodes"])
+        self.assertIn("R1.precipitation", preview["hard_blocker_nodes"])
+        self.assertEqual(preview["reviewable_count"], 3)  # includes preloaded maize quantity
+
+    def test_cancelled_batch_review_does_not_mutate_nodes_or_audit_tables(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        self._prepare_batch_review_states(task["task_id"])
+        version = self.store.graph(task["task_id"])["task"]["graph_version"]
+
+        result = self.store.create_batch_review(
+            task["task_id"], version, False, "reviewer", "逐项审核",
+        )
+
+        self.assertEqual(result["status"], "individual_review_required")
+        self.assertEqual(self.store.node(task["task_id"], "P1.maize.producer_price")["review_status"], "auto_verified")
+        self.assertEqual(self.store.connection.execute("SELECT COUNT(*) FROM batch_reviews").fetchone()[0], 0)
+
+    def test_batch_confirmation_approves_a_and_b_but_preserves_blockers(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        self._prepare_batch_review_states(task["task_id"])
+        version = self.store.graph(task["task_id"])["task"]["graph_version"]
+
+        result = self.store.create_batch_review(
+            task["task_id"], version, True, "batch-reviewer", "确认自动核验与中风险候选",
+        )
+
+        self.assertEqual(result["status"], "approved")
+        self.assertEqual(result["approved_count"], 3)
+        self.assertEqual(self.store.node(task["task_id"], "P1.maize.producer_price")["review_status"], "approved")
+        self.assertEqual(self.store.node(task["task_id"], "P1.maize.intermediate_cost")["review_status"], "approved")
+        self.assertEqual(self.store.node(task["task_id"], "R1.precipitation")["review_status"], "unsubmitted")
+        self.assertEqual(self.store.node(task["task_id"], "R1.surface_runoff")["review_status"], "unsubmitted")
+        self.assertEqual(self.store.connection.execute(
+            "SELECT COUNT(*) FROM batch_review_nodes WHERE batch_review_id=?", (result["batch_review_id"],)
+        ).fetchone()[0], 3)
+        self.assertEqual(self.store.connection.execute(
+            "SELECT COUNT(*) FROM reviews WHERE reviewer='batch-reviewer'"
+        ).fetchone()[0], 3)
+
+    def test_stale_batch_graph_version_is_all_or_nothing(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        self._prepare_batch_review_states(task["task_id"])
+
+        with self.assertRaises(ConflictError):
+            self.store.create_batch_review(task["task_id"], 999, True, "reviewer", "stale")
+
+        self.assertEqual(self.store.node(task["task_id"], "P1.maize.producer_price")["review_status"], "auto_verified")
+        self.assertEqual(self.store.connection.execute("SELECT COUNT(*) FROM batch_reviews").fetchone()[0], 0)
+
     def test_workflow_failure_reason_does_not_persist_raw_provider_text(self):
         """Break caught: a provider exception could leak a response body into SQLite events."""
         class Workflow:

@@ -106,6 +106,18 @@ class GepStore:
                 version INTEGER NOT NULL, decision TEXT NOT NULL, reviewer TEXT NOT NULL,
                 note TEXT NOT NULL, created_utc TEXT NOT NULL, UNIQUE(node_id, version)
             );
+            CREATE TABLE IF NOT EXISTS batch_reviews (
+                batch_review_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL REFERENCES tasks(task_id), graph_version INTEGER NOT NULL,
+                reviewer TEXT NOT NULL, note TEXT NOT NULL, ignore_individual_review INTEGER NOT NULL,
+                created_utc TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS batch_review_nodes (
+                batch_review_id TEXT NOT NULL REFERENCES batch_reviews(batch_review_id),
+                node_id TEXT NOT NULL REFERENCES nodes(node_id), node_version INTEGER NOT NULL,
+                risk_tier TEXT NOT NULL, decision TEXT NOT NULL,
+                PRIMARY KEY(batch_review_id,node_id), UNIQUE(node_id,node_version)
+            );
             CREATE TABLE IF NOT EXISTS snapshots (
                 snapshot_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                 graph_json TEXT NOT NULL, created_utc TEXT NOT NULL
@@ -515,6 +527,104 @@ class GepStore:
             self._bump_graph_version(row["task_id"])
             self._event(row["task_id"], node_id, f"node.{decision}", {"version": expected_version, "reviewer": reviewer})
         return self.node(row["task_id"], row["node_key"])
+
+    def batch_review_preview(self, task_id: str) -> dict[str, Any]:
+        graph = self.graph(task_id)
+        buckets: dict[str, list[str]] = {
+            "auto_ready_nodes": [], "review_ready_nodes": [], "research_gap_nodes": [],
+            "expert_intervention_nodes": [], "failed_nodes": [], "active_nodes": [],
+        }
+        for node in graph["nodes"]:
+            if node["kind"] not in {"indicator", "input"}:
+                continue
+            if node["review_status"] == "auto_verified":
+                buckets["auto_ready_nodes"].append(node["node_key"])
+            elif node["review_status"] == "pending_review":
+                buckets["review_ready_nodes"].append(node["node_key"])
+            elif node["acquisition_status"] == "research_complete":
+                buckets["research_gap_nodes"].append(node["node_key"])
+            elif node["acquisition_status"] == "manual_required":
+                buckets["expert_intervention_nodes"].append(node["node_key"])
+            elif node["acquisition_status"] == "agent_failed":
+                buckets["failed_nodes"].append(node["node_key"])
+            elif node["acquisition_status"] in {"awaiting_agent", "agent_queued", "agent_running"}:
+                buckets["active_nodes"].append(node["node_key"])
+        hard = sorted(set(
+            buckets["research_gap_nodes"] + buckets["expert_intervention_nodes"]
+            + buckets["failed_nodes"] + buckets["active_nodes"]
+        ))
+        return {
+            "task_id": task_id, "graph_version": graph["task"]["graph_version"], **buckets,
+            "auto_ready_count": len(buckets["auto_ready_nodes"]),
+            "review_ready_count": len(buckets["review_ready_nodes"]),
+            "reviewable_count": len(buckets["auto_ready_nodes"]) + len(buckets["review_ready_nodes"]),
+            "hard_blocker_nodes": hard, "hard_blocker_count": len(hard),
+        }
+
+    def create_batch_review(
+        self, task_id: str, expected_graph_version: int, ignore_individual_review: bool,
+        reviewer: str, note: str,
+    ) -> dict[str, Any]:
+        if not reviewer.strip() or not note.strip():
+            raise ValueError("reviewer and note are required")
+        preview = self.batch_review_preview(task_id)
+        if preview["graph_version"] != expected_graph_version:
+            raise ConflictError("task graph version is stale")
+        review_queue = preview["auto_ready_nodes"] + preview["review_ready_nodes"]
+        if not ignore_individual_review:
+            return {
+                "task_id": task_id, "status": "individual_review_required",
+                "graph_version": expected_graph_version, "review_queue": review_queue,
+                "reviewable_count": len(review_queue), "hard_blocker_nodes": preview["hard_blocker_nodes"],
+            }
+        batch_id = uuid.uuid4().hex
+        rows = self.connection.execute(
+            "SELECT * FROM nodes WHERE task_id=? AND review_status IN ('auto_verified','pending_review') ORDER BY node_key",
+            (task_id,),
+        ).fetchall()
+        now = _utc_now()
+        try:
+            with self.connection:
+                current_version = self.connection.execute(
+                    "SELECT graph_version FROM tasks WHERE task_id=?", (task_id,)
+                ).fetchone()[0]
+                if current_version != expected_graph_version:
+                    raise ConflictError("task graph version is stale")
+                self.connection.execute(
+                    "INSERT INTO batch_reviews VALUES (?,?,?,?,?,?,?)",
+                    (batch_id, task_id, expected_graph_version, reviewer, note, 1, now),
+                )
+                for row in rows:
+                    evidence = json.loads(row["evidence_json"])
+                    risk_tier = str(evidence.get("current", evidence).get("risk_tier") or "B")
+                    updated = self.connection.execute(
+                        "UPDATE nodes SET review_status='approved' WHERE node_id=? AND version=? AND review_status IN ('auto_verified','pending_review')",
+                        (row["node_id"], row["version"]),
+                    )
+                    if updated.rowcount != 1:
+                        raise ConflictError("batch node version is stale")
+                    self.connection.execute(
+                        "INSERT INTO reviews VALUES (?,?,?,?,?,?,?)",
+                        (uuid.uuid4().hex, row["node_id"], row["version"], "approved", reviewer, note, now),
+                    )
+                    self.connection.execute(
+                        "INSERT INTO batch_review_nodes VALUES (?,?,?,?,?)",
+                        (batch_id, row["node_id"], row["version"], risk_tier, "approved"),
+                    )
+                self._bump_graph_version(task_id)
+                self._event(task_id, None, "batch_review.completed", {
+                    "batch_review_id": batch_id, "reviewer": reviewer, "approved_count": len(rows),
+                    "previous_graph_version": expected_graph_version,
+                })
+        except (sqlite3.IntegrityError, IndexError) as error:
+            raise ConflictError("batch review conflicted with an existing node review") from error
+        return {
+            "batch_review_id": batch_id, "task_id": task_id, "status": "approved",
+            "reviewer": reviewer, "approved_count": len(rows),
+            "previous_graph_version": expected_graph_version,
+            "graph_version": expected_graph_version + 1,
+            "hard_blocker_nodes": preview["hard_blocker_nodes"],
+        }
 
     def revise_node(
         self, node_id: str, expected_version: int, value: Any, unit: str, operator: str, reason: str,

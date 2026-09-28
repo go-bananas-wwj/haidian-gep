@@ -12,6 +12,8 @@ export const taskApi = {
   create: payload => api("/tasks", { method:"POST", body:JSON.stringify(payload) }), snapshot: taskId => api(`/tasks/${taskId}/snapshots`, { method:"POST", body:"{}" }),
   supplement: (taskId, payload) => api(`/tasks/${taskId}/supplement`, { method:"POST", body:JSON.stringify(payload) }),
   autoSupplement: taskId => api(`/tasks/${taskId}/supplements:auto`, { method:"POST", body:"{}" }),
+  batchPreview: taskId => api(`/tasks/${taskId}/batch-review-preview`),
+  batchReview: (taskId, payload) => api(`/tasks/${taskId}/batch-reviews`, { method:"POST", body:JSON.stringify(payload) }),
   run: payload => api("/runs", { method:"POST", body:JSON.stringify(payload) }), runChain: runId => api(`/runs/${runId}/chain`),
   review: (nodeId, payload) => api(`/nodes/${nodeId}/reviews`, { method:"POST", body:JSON.stringify(payload) }),
 };
