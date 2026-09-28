@@ -109,7 +109,7 @@ async function showPrepareView(view) {
   $("#show-indicator-workbench").classList.toggle("active", !backend); $("#show-data-backend").classList.toggle("active", backend);
   if (!backend) { requestAnimationFrame(() => state.graph?.layoutEdges()); return; }
   try {
-    const { assets } = await taskApi.assets({year:2024,region_code:"110108"}); state.assets = assets;
+    const { assets } = await taskApi.assets({region_code:"110108"}); state.assets = assets;
     const filter = $("#asset-type-filter"); const selected = filter.value;
     filter.replaceChildren(new Option("全部类型", ""), ...[...new Set(assets.map(asset => asset.asset_type))].sort().map(type => new Option(type, type)));
     filter.value = selected; renderAssetCatalog($("#asset-catalog"), assets, filter.value);
