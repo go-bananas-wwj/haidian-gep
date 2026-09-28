@@ -9,6 +9,20 @@ from gep.task_service import GepStore
 
 
 class SupplementWorkerTests(unittest.TestCase):
+    def test_worker_loads_the_selected_runtime_provider(self):
+        """Break caught: the worker could ignore SUPPLEMENT_PROVIDER and always use Dify."""
+        from gep.worker import SupplementWorker
+
+        sentinel = object()
+        worker = SupplementWorker("unused.sqlite3")
+        with unittest.mock.patch("gep.worker.workflow_from_environment", return_value=sentinel) as factory, \
+                unittest.mock.patch("gep.worker.GepStore") as store_class:
+            store_class.return_value.process_next_supplement.return_value = None
+            worker.run_once()
+
+        factory.assert_called_once_with()
+        store_class.assert_called_once_with(worker.database_path, supplement_workflow=sentinel)
+
     def test_worker_claims_a_persisted_queue_after_the_request_connection_is_closed(self):
         """Break caught: queued work could disappear when the API process or browser disconnects."""
         class Workflow:

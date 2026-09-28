@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .dify import DifyWorkflow
+from .supplement import workflow_from_environment
 from .task_service import GepStore, SupplementWorkflow
 
 
@@ -15,7 +15,7 @@ class SupplementWorker:
         self.supplement_workflow = supplement_workflow
 
     def run_once(self) -> dict[str, Any] | None:
-        workflow = self.supplement_workflow if self.supplement_workflow is not None else DifyWorkflow.from_environment()
+        workflow = self.supplement_workflow if self.supplement_workflow is not None else workflow_from_environment()
         store = GepStore(self.database_path, supplement_workflow=workflow)
         try:
             return store.process_next_supplement()
