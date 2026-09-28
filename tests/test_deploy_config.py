@@ -57,6 +57,17 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("depends_on:", web_section)
         self.assertIn("condition: service_healthy", web_section)
 
+    def test_loopback_demo_proxy_supplies_the_trusted_batch_reviewer(self):
+        """Break caught: the deployed batch-confirm button could always receive HTTP 503."""
+        root = Path(__file__).parents[1]
+        compose = (root / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
+        nginx = (root / "deploy" / "nginx.conf").read_text(encoding="utf-8")
+        api_section = compose.split("  task-api:", 1)[1].split("  task-worker:", 1)[0]
+
+        self.assertIn("GEP_TRUSTED_PROXY_USER_HEADER: HTTP_X_GEP_ACTOR", api_section)
+        self.assertIn('proxy_set_header X-GEP-Actor "demo-reviewer"', nginx)
+        self.assertIn('"127.0.0.1:9088:8080"', compose)
+
     def test_canvas_uses_nginx_api_route_on_the_9088_web_entrypoint(self):
         page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
 

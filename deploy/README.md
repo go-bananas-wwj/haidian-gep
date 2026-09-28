@@ -16,7 +16,9 @@ curl --fail http://127.0.0.1:9088/api/health
 
 API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0.0.1:9088`，经 `/api/` 代理访问 API，不会启动第二个 SQLite 写进程。`data/` 以只读方式挂载进 API 容器，容器不能改写准入原件或清洗数据。`9088` 是用户于 2026-09-22 批准的入口；在反向代理、访问控制和 TLS 经过主机核查前，不得将其公开到互联网。
 
-`task-worker` 是同一 Compose 项目中唯一的补充执行器，不发布宿主机端口。`POST /tasks/{id}/supplement` 只将带幂等键的请求写为 `queued`；worker 从同一 SQLite 运行时卷原子认领为 `running`，然后写入 `completed_pending_review`、`blocked`、`failed` 或 `stale` 事件。容器或浏览器重启不会抹去已排队任务。候选与人工新版本冲突时作业保留为 `stale`，不覆盖节点。
+当前 Compose 是回环地址上的单用户 Demo，Nginx 会覆盖外部同名头并注入固定 `X-GEP-Actor: demo-reviewer`，API 只信任该代理头，用于逐项和整批审核审计。正式公开前必须替换为真实登录身份和访问控制，不能沿用固定 Demo 身份。
+
+`task-worker` 是同一 Compose 项目中唯一的研究执行器，不发布宿主机端口。`POST /tasks/{id}/supplement` 只将带幂等键的请求写为 `queued`；worker 从同一 SQLite 运行时卷原子认领为 `running`，依次检查本地准入目录、版本化官方来源注册表和适用的 AEF 空间资产，再写入 A 自动采用、B 建议复核、research-gap、C 专家介入、failed 或 stale。容器或浏览器重启不会抹去已排队任务；已完成 research-gap 不会因恢复页面而循环重跑。候选与人工新版本冲突时作业保留为 `stale`，不覆盖节点。
 
 编排文件会先等待 API 的 `/health` 成功，再启动 Web 代理。单服务重建期间可短暂返回 `502`；探测与发布脚本应采用带重试的健康检查，而不是把该启动窗口误判为故障。
 
@@ -33,7 +35,15 @@ DEEPSEEK_MODEL=deepseek-flash
 DEEPSEEK_TIMEOUT_SECONDS=30
 ```
 
-密钥不得出现在 shell 历史、Compose 文件、Git、镜像层、SQLite、事件、静态资源、截图或导出包中。启动前只核验变量是否存在和文件权限，不打印变量值；部署后以仅报告文件名/计数的扫描方式检查容器配置、应用日志、运行数据库和静态资源。DeepSeek 返回的来源 ID 与 SHA-256 必须匹配当前工作单的准入证据，否则 worker 拒绝候选。没有匹配证据时节点进入“待人工介入”，不会调用模型填零。
+密钥不得出现在 shell 历史、Compose 文件、Git、镜像层、SQLite、事件、静态资源、截图或导出包中。启动前只核验变量是否存在和文件权限，不打印变量值；部署后以仅报告文件名/计数的扫描方式检查容器配置、应用日志、运行数据库和静态资源。DeepSeek 只生成说明，不能决定数值、来源和风险等级。A 候选限于本地精确准入事实或完成验证的确定性/AEF结果；政府官方代理变量进入 B；工具全部执行后仍无数值时进入“已自动检索·等待数据”，而不是泛化为人工介入。
+
+## 官方来源、AEF 与批量审核
+
+`gep/official_sources.json` 是随代码版本冻结的政府来源注册表。worker 只接受 allowlist 中的北京市政府 HTTPS 域名，在线验证最终 URL 后再使用登记事实；越界重定向、网络失败或口径不一致均不能自动采用。首批登记包括北京市园林绿化局 2024 年绿化资源、公园名录，北京市水务局 2024 年水资源公报及北京市生态环境状况公报。
+
+AEF 工具只检查 2024 VRT、64 波段、10 m、EPSG:32650、Source Cooperative COG、正式边界、训练标签和验证产物。只有输出栅格哈希与验证记录一致时才返回 ready；当前仅有 VRT/索引时必须返回 research-gap，不得声称已经完成绿地分类。
+
+`GET /tasks/{id}/batch-review-preview` 展示 A、B、research-gap、C、失败和硬阻断；`POST /tasks/{id}/batch-reviews` 在可信代理身份下批量批准当前版本的 A/B 节点。取消整批确认不修改数据并返回逐项队列。research-gap、C、失败和版本冲突不能被批量确认绕过。
 
 启动时在受限会话中加载该文件，再运行 Compose：
 
