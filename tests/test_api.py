@@ -103,6 +103,24 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(asset["local_path"], None)
         self.assertTrue(asset["path_redacted"])
 
+    def test_demo_readiness_and_snapshot_routes_do_not_change_formal_gate(self):
+        _, task, _ = self.request("POST", "/tasks", {"region_code":"110108", "year":2024,
+            "boundary_version":"demo", "standard_version":"GB/T 46869-2025", "data_version":"smart-data-2024-v1"})
+        evidence = json.dumps({"current":{"result_class":"model_estimate","demo_auto_adopt":True}})
+        self.app.store.connection.execute(
+            "UPDATE nodes SET value_json='1',unit='demo',evidence_json=?,acquisition_status='candidate_ready' "
+            "WHERE task_id=? AND kind='input'", (evidence, task["task_id"]),
+        )
+        self.app.store.connection.commit()
+
+        status, readiness, _ = self.request("GET", f"/tasks/{task['task_id']}/demo-readiness")
+        snapshot_status, snapshot, _ = self.request("POST", f"/tasks/{task['task_id']}/demo-snapshots", {})
+        formal_status, formal, _ = self.request("GET", f"/tasks/{task['task_id']}/readiness")
+
+        self.assertEqual(status, 200); self.assertTrue(readiness["demo_ready"])
+        self.assertEqual(snapshot_status, 201); self.assertEqual(snapshot["result_scope"], "智能试算")
+        self.assertEqual(formal_status, 200); self.assertFalse(formal["ready_for_snapshot"])
+
     def test_derived_observation_api_requires_exact_metric_year_and_region(self):
         from gep.smart_data import AssetRecord, ObservationRecord
 

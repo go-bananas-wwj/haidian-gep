@@ -130,6 +130,10 @@ class GepStore:
                 snapshot_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                 graph_json TEXT NOT NULL, created_utc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS demo_snapshots (
+                snapshot_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
+                graph_json TEXT NOT NULL, created_utc TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS supplement_jobs (
                 job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                 node_id TEXT NOT NULL REFERENCES nodes(node_id), idempotency_key TEXT NOT NULL,
@@ -404,6 +408,57 @@ class GepStore:
             "blocking_node_count": len(blocking),
             "blocking_nodes": blocking,
         }
+
+    def formal_readiness(self, task_id: str) -> dict[str, Any]:
+        report = self.readiness(task_id)
+        return {**report, "formal_ready": report["ready_for_snapshot"]}
+
+    def demo_readiness(self, task_id: str) -> dict[str, Any]:
+        graph = self.graph(task_id)
+        inputs = [node for node in graph["nodes"] if node["kind"] == "input" and node["required"]]
+        missing = [node["node_key"] for node in inputs if node["value"] is None]
+        estimated = 0; classes = {}
+        for node in inputs:
+            current = node.get("evidence", {}).get("current", node.get("evidence", {}))
+            result_class = current.get("result_class", "observed" if node["value"] is not None else "missing")
+            classes[result_class] = classes.get(result_class, 0) + 1
+            if node["value"] is not None and result_class in {"model_estimate", "suggested_review", "not_applicable_candidate"}:
+                estimated += 1
+        populated = len(inputs) - len(missing)
+        formal = self.readiness(task_id)["ready_for_snapshot"]
+        return {"task_id":task_id, "graph_version":graph["task"]["graph_version"], "demo_ready":not missing,
+                "formal_ready":formal, "missing_nodes":missing,
+                "estimated_input_ratio":estimated / populated if populated else 0.0,
+                "result_classes":dict(sorted(classes.items()))}
+
+    def automation_summary(self, task_id: str) -> dict[str, Any]:
+        graph = self.graph(task_id); classes = {}; human = {}
+        for node in graph["nodes"]:
+            if node["kind"] != "input": continue
+            current = node.get("evidence", {}).get("current", node.get("evidence", {}))
+            result_class = current.get("result_class", "pending")
+            classes[result_class] = classes.get(result_class, 0) + 1
+            if result_class in {"needs_department_data", "needs_business_decision"}:
+                human.setdefault(result_class, []).append(node["node_key"])
+        return {"task_id":task_id, "result_classes":dict(sorted(classes.items())),
+                "human_work":[{"type":key,"nodes":sorted(value),"count":len(value)} for key,value in sorted(human.items())],
+                "indicator_progress":self.indicator_progress(task_id)}
+
+    def create_demo_snapshot(self, task_id: str) -> dict[str, Any]:
+        readiness = self.demo_readiness(task_id)
+        if not readiness["demo_ready"]: raise SnapshotBlocked(readiness["missing_nodes"])
+        graph = self.graph(task_id); chains = {}
+        for node in graph["nodes"]:
+            try: chains[node["node_key"]] = self.smart_data.calculation_chain(node["node_id"])
+            except KeyError: pass
+        snapshot_id = uuid.uuid4().hex
+        payload = {"result_scope":"智能试算", "formal_gep_value":None, "task":graph["task"],
+                   "nodes":graph["nodes"], "readiness":readiness, "calculation_chains":chains}
+        with self.connection:
+            self.connection.execute("INSERT INTO demo_snapshots VALUES (?,?,?,?)",
+                (snapshot_id, task_id, json.dumps(payload, ensure_ascii=False, sort_keys=True), _utc_now()))
+        return {"snapshot_id":snapshot_id, "task_id":task_id, "result_scope":"智能试算",
+                "formal_gep_value":None, "estimated_input_ratio":readiness["estimated_input_ratio"]}
 
     def snapshots(self, task_id: str) -> list[dict[str, Any]]:
         """List immutable snapshots for task recovery without exposing mutable graph state."""

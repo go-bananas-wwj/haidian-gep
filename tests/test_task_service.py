@@ -32,6 +32,30 @@ class TaskServiceTests(unittest.TestCase):
     def register_test_boundary(self, boundary_version="b1"):
         self.store.register_boundary_admission(boundary_version, "c" * 64, 430.0, "EPSG:4326", accepted=True)
 
+    def test_demo_and_formal_readiness_remain_separate_for_model_estimates(self):
+        task = self.store.create_task("110108", 2024, "demo", "GB/T 46869-2025", "smart-data-2024-v1")
+        evidence = json.dumps({"current":{"result_class":"model_estimate","demo_auto_adopt":True}})
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json='1',unit='demo',evidence_json=?,acquisition_status='candidate_ready' "
+            "WHERE task_id=? AND kind='input'", (evidence, task["task_id"]),
+        )
+        self.store.connection.commit()
+
+        demo = self.store.demo_readiness(task["task_id"])
+        formal = self.store.formal_readiness(task["task_id"])
+        snapshot = self.store.create_demo_snapshot(task["task_id"])
+
+        self.assertTrue(demo["demo_ready"])
+        self.assertFalse(demo["formal_ready"])
+        self.assertEqual(demo["estimated_input_ratio"], 1.0)
+        self.assertFalse(formal["formal_ready"])
+        self.assertEqual(snapshot["result_scope"], "智能试算")
+        self.assertEqual(snapshot["formal_gep_value"], None)
+        approved = self.store.connection.execute(
+            "SELECT COUNT(*) FROM nodes WHERE task_id=? AND review_status='approved'", (task["task_id"],)
+        ).fetchone()[0]
+        self.assertEqual(approved, 0)
+
     def test_new_task_creates_all_22_indicators_and_real_maize_evidence(self):
         task = self.store.create_task(
             region_code="110108",

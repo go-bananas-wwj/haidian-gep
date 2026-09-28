@@ -190,6 +190,12 @@ class DemoApi:
                     return self._response(start_response, 200, self.store.graph(task_id))
                 if method == "GET" and parts[2:] == ["readiness"]:
                     return self._response(start_response, 200, self.store.readiness(task_id))
+                if method == "GET" and parts[2:] == ["demo-readiness"]:
+                    return self._response(start_response, 200, self.store.demo_readiness(task_id))
+                if method == "GET" and parts[2:] == ["automation-summary"]:
+                    return self._response(start_response, 200, self.store.automation_summary(task_id))
+                if method == "POST" and parts[2:] == ["demo-snapshots"]:
+                    return self._response(start_response, 201, self.store.create_demo_snapshot(task_id))
                 if method == "GET" and parts[2:] == ["appendix-e"]:
                     return self._response(start_response, 200, self.store.appendix_e(task_id))
                 if method == "GET" and parts[2:] == ["events"]:
@@ -218,6 +224,8 @@ class DemoApi:
                 node_id = parts[1]
                 if method == "GET" and parts[2:] == ["evidence"]:
                     return self._response(start_response, 200, self.store.evidence(node_id))
+                if method == "GET" and parts[2:] == ["calculation-chain"]:
+                    return self._response(start_response, 200, self.store.smart_data.calculation_chain(node_id))
                 body = self._json_body(environ)
                 if method == "POST" and parts[2:] == ["reviews"]:
                     reviewer = environ.get(self.reviewer_header, "").strip() if self.reviewer_header else ""
