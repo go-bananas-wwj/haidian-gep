@@ -35,9 +35,9 @@
     </section>
 
     <section class="page" data-page-panel="prepare" hidden>
-      <div class="section-head"><div><p class="eyebrow">数据准备</p><h1>智能体先建立 GEP 数据图，再由人工补齐和审核</h1><p>根节点按物质产品、调节服务和文化服务展开。动画只回放已经持久化的智能体或人工事件。</p></div><div class="canvas-tools"><button id="zoom-out">−</button><span id="zoom-value">100%</span><button id="zoom-in">+</button><button id="collapse-all">折叠</button><button id="expand-all">展开</button></div></div>
+      <div class="section-head"><div><p class="eyebrow">数据准备</p><h1>智能体自动研究，人工只处理异常与关键判断</h1><p>系统自动检索本地和官方来源、检查 AEF 空间资产并按证据风险分流；动画只回放已持久化事件。</p></div><div class="canvas-tools"><button id="zoom-out">−</button><span id="zoom-value">100%</span><button id="zoom-in">+</button><button id="collapse-all">折叠</button><button id="expand-all">展开</button></div></div>
       <div class="prepare-layout"><div class="canvas-card"><div class="canvas-caption"><span class="live-dot"></span><span id="graph-summary">等待任务图</span><span class="muted">点击农产品、林产品或任一指标查看其数据支路</span></div><div id="graph-canvas" class="canvas" aria-live="polite"></div></div>
-        <aside class="right-rail"><div class="rail-card"><p class="eyebrow">当前补充</p><h2 id="agent-title">智能体准备中</h2><p id="agent-text">创建任务后，智能体会根据指标目录逐项定位可用来源。</p></div><div class="rail-card"><p class="eyebrow">审核闸门</p><div id="gate-summary" class="gate-summary">尚未加载</div><button id="go-scheme" class="wide">查看核算方案</button></div><div class="rail-card event-card"><p class="eyebrow">已持久化事件</p><ol id="event-list" class="event-list"><li>暂无事件</li></ol></div></aside></div>
+        <aside class="right-rail"><div class="rail-card"><p class="eyebrow">自动研究</p><h2 id="agent-title">智能体准备中</h2><p id="agent-text">创建任务后，智能体会自动检索、提取、校验并分级。</p></div><div class="rail-card"><p class="eyebrow">审核闸门</p><div id="gate-summary" class="gate-summary">尚未加载</div><button id="batch-review" class="primary wide">整批确认</button><button id="go-scheme" class="wide rail-secondary">查看核算方案</button></div><div class="rail-card event-card"><p class="eyebrow">已持久化事件</p><ol id="event-list" class="event-list"><li>暂无事件</li></ol></div></aside></div>
     </section>
 
     <section class="page" data-page-panel="scheme" hidden><div class="section-head"><div><p class="eyebrow">核算方案</p><h1>冻结前逐项确认</h1><p>图版本、数据版本、边界和公式版本共同构成可复算快照。</p></div><button id="readiness">刷新核算闸门</button></div><div id="readiness-card" class="readiness-card"><h2>尚未加载任务</h2></div><div class="action-row"><button id="freeze" class="primary" disabled>生成核算快照</button><span class="muted">快照仅在全部适用输入已审核时生成。</span></div></section>
@@ -48,20 +48,21 @@
   </main>
   <div id="drawer-overlay" class="drawer-overlay" hidden>
     <aside id="detail-drawer" class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true" tabindex="-1">
-      <header class="drawer-header"><div><p class="eyebrow">智能体补充与审核</p><h2 id="drawer-title">数据节点</h2><p id="drawer-status" class="status-line"></p></div><button id="close-drawer" class="icon-button" aria-label="关闭详情">×</button></header>
+      <header class="drawer-header"><div><p class="eyebrow">数据来源与审核</p><h2 id="drawer-title">数据节点</h2><p id="drawer-status" class="status-line">已自动采用·待整批确认</p></div><button id="close-drawer" class="icon-button" aria-label="关闭详情">×</button></header>
       <button id="drawer-back" class="drawer-back" type="button" hidden>← 返回科目详情</button>
       <div id="drawer-indicator-view" class="drawer-view" hidden><p id="detail-description">按核算要素、来源和审核状态组织数据支路。</p><div id="fishbone" class="fishbone" aria-label="产品数据鱼骨图"></div></div>
       <div id="drawer-evidence-view" class="drawer-view" hidden>
         <section class="evidence-result"><span>当前结果</span><strong id="evidence-value">待补充</strong><span id="evidence-unit"></span></section>
-        <section><h3>智能体如何补充</h3><p id="evidence-explanation">尚未形成可审核候选。</p></section>
-        <section><h3>来源与定位</h3><div id="source-card" class="source-card">尚无可核验来源。</div></section>
-        <details><summary>查看工具执行记录</summary><div id="tool-record" class="tool-record">尚无工具执行记录。</div></details>
-        <section><h3>方法、范围与待确认事项</h3><div id="method-card" class="method-card">尚未加载。</div></section>
-        <div id="evidence-actions" class="dialog-actions"><span class="muted">请求智能体补充</span></div>
+        <section><h3>数据来源</h3><div id="source-card" class="source-card">尚无可核验来源。</div></section>
+        <section><h3>自动校验</h3><p id="evidence-validation">尚未形成校验结论。</p></section>
+        <details><summary>工作执行记录</summary><div id="tool-record" class="tool-record">尚无工具执行记录。</div></details>
+        <section><h3>方法、范围与风险</h3><div id="method-card" class="method-card">尚未加载。</div></section>
+        <div id="evidence-actions" class="dialog-actions"><button type="button">标记问题</button><button type="button">人工修正</button></div>
       </div>
     </aside>
   </div>
   <dialog id="assist-dialog" class="assist-dialog"><h2 id="assist-title">人工协助</h2><p id="assist-copy"></p><label>处理说明<textarea id="assist-note" rows="3" placeholder="说明上传材料、估计依据或暂缓原因"></textarea></label><div class="dialog-actions"><button id="cancel-assist">取消</button><button id="confirm-assist" class="primary">保存为待审核事项</button></div></dialog>
+  <dialog id="batch-review-dialog" class="batch-review-dialog"><div class="dialog-top"><div><p class="eyebrow">整批确认</p><h2>批量审核自动研究结果</h2><p>仍有 <strong id="batch-unreviewed-count">0</strong> 项未逐项审核。确定后，A/B 候选将默认审核通过；硬阻断保持不变。</p></div><button id="close-batch-review" class="icon-button" aria-label="关闭整批确认">×</button></div><div id="batch-review-summary" class="batch-review-summary"></div><div class="dialog-actions"><button id="cancel-batch-review">取消，逐项审核</button><button id="confirm-batch-review" class="primary">确定，批量确认</button></div></dialog>
   <script type="module" src="/app.js"></script>
   <!-- Canvas module contract: localStorage haidian-gep:view-layout; pointerdown; style.zoom; 折叠全部。
        Persistent event route /events?after= uses lastEvent and setInterval; event label 事件记录。

@@ -4,7 +4,8 @@ const CATEGORIES = [
 const SVG_NS = "http://www.w3.org/2000/svg";
 const FLOW_EVENTS = new Set([
   "graph.initialized", "supplement.queued", "supplement.running", "supplement.candidate_persisted",
-  "supplement.manual_required", "supplement.failed", "supplement.stale",
+  "candidate.auto_verified", "research.completed", "aef.inspected", "supplement.manual_required",
+  "supplement.failed", "supplement.stale", "batch_review.completed",
 ]);
 
 // The graph is fixed by GB/T 46869-2025.  Server nodes supply current state,
@@ -27,7 +28,11 @@ const FIELD_LABELS = {
   quantity: "产量", harvest_quantity: "采收量", eligible_quantity: "适格产量", deliverable_quantity: "可交付量",
   producer_price: "生产者价格", production_cost: "生产成本", intermediate_cost: "中间投入成本", labor: "劳动报酬",
   depreciation: "固定资产折旧", tax_net: "生产税净额", capital_return: "资本回报", actual_energy_output: "实际能源产出",
-  actual_use: "实际使用量", local_used_water: "本地生态供水量", carbon_price: "碳价",
+  actual_use: "实际使用量", local_used_water: "本地生态供水量", outside_water: "区域外调入水量", recycled_water: "再生水量",
+  ecosystem_area: "生态系统面积", area: "核算面积", precipitation: "降水量", surface_runoff: "地表径流量", actual_et: "实际蒸散发量",
+  valuation_parameter: "价值参数", npp_or_nep: "NPP / NEP", respiration_or_conversion: "呼吸或转换参数", carbon_price: "碳价",
+  pollutant_concentration: "污染物浓度", emission_inventory: "排放清单", removal_parameter: "净化参数", treatment_cost: "治理成本",
+  visitor_count: "访问人次", stay_duration: "停留时长", hourly_wage: "小时工资", attribution: "生态归因比例",
 };
 
 function readableField(node) {
@@ -37,14 +42,16 @@ function readableField(node) {
 export function nodeState(node) {
   if (node.review_status === "approved") return ["审核通过", "approved"];
   if (node.review_status === "returned") return ["退回重查", "returned"];
+  if (node.review_status === "auto_verified") return ["已自动采用·待整批确认", "auto"];
   if (node.review_status === "pending_review" && node.evidence?.corrections?.length) return ["人工已修正·待审核", "review"];
-  if (node.review_status === "pending_review") return ["智能体已补充·待审核", "review"];
+  if (node.review_status === "pending_review") return ["已补充·建议复核", "review"];
   if (node.acquisition_status === "agent_queued") return ["智能体排队中", "queued"];
   if (node.acquisition_status === "agent_running") return ["智能体补充中", "running"];
-  if (node.acquisition_status === "manual_required") return ["待人工介入", "manual"];
-  if (node.acquisition_status === "agent_failed") return ["补充失败·可重试", "failed"];
+  if (node.acquisition_status === "research_complete") return ["已自动检索·等待数据", "gap"];
+  if (node.acquisition_status === "manual_required") return ["需专家介入", "manual"];
+  if (node.acquisition_status === "agent_failed") return ["执行失败·可重试", "failed"];
   if (node.acquisition_status === "awaiting_agent") return ["待智能体补充", "waiting"];
-  return ["待人工介入", "manual"];
+  return ["需专家介入", "manual"];
 }
 
 export class GepGraph {
@@ -84,7 +91,7 @@ export class GepGraph {
           const node = byKey.get(key) || { node_key:key, label, acquisition_status:"awaiting_agent", review_status:"unsubmitted" };
           const [state, style] = nodeState(node); const button = document.createElement("button"); button.className = "graph-node"; button.dataset.node = key;
           button.innerHTML = `<span class="node-name"><span class="node-code">${key}</span>${label}</span><span class="node-state ${style}">${state}</span>`;
-          button.onclick = () => { if (["P1", "P2", "P3", "P4"].includes(key)) this.onDetail?.(node, detailDescriptions[key]); else this.onNode?.(node); };
+          button.onclick = () => this.onDetail?.(node, detailDescriptions[key] || `${label}按方法卡展开必需输入、数据来源和风险状态。`);
           stack.append(button);
         }
         card.append(stack);

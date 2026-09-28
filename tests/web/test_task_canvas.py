@@ -48,11 +48,20 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn("鱼骨", graph)
         self.assertIn("localStorage", graph)
 
+    def test_every_indicator_opens_its_input_branch_not_only_material_products(self):
+        """Break caught: official green/AEF inputs could be hidden behind a non-expandable regulating node."""
+        graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
+
+        self.assertNotIn('["P1", "P2", "P3", "P4"].includes(key)', graph)
+        self.assertIn("this.onDetail?.(node, detailDescriptions[key]", graph)
+
     def test_product_fishbone_uses_readable_accounting_field_labels(self):
         graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
         self.assertIn("资本回报", graph)
         self.assertIn("中间投入成本", graph)
         self.assertIn("玉米产量", graph)
+        self.assertIn("生态系统面积", graph)
+        self.assertIn("本地生态供水量", graph)
 
     def test_canvas_matches_the_overleaf_accounting_board_hierarchy(self):
         graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
@@ -120,9 +129,9 @@ class TaskCanvasContractTests(unittest.TestCase):
         graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
         app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
 
-        for label in ("智能体排队中", "智能体补充中", "智能体已补充·待审核", "待人工介入", "补充失败·可重试", "退回重查", "审核通过"):
+        for label in ("智能体排队中", "智能体补充中", "已自动采用·待整批确认", "已补充·建议复核", "已自动检索·等待数据", "需专家介入", "执行失败·可重试", "退回重查", "审核通过"):
             self.assertIn(label, graph)
-        for summary in ("待审核", "待人工介入", "补充失败", "处理中"):
+        for summary in ("自动采用", "建议复核", "等待数据", "专家介入", "执行失败", "处理中"):
             self.assertIn(summary, app)
 
     def test_restoring_a_historical_task_heals_its_automatic_queue(self):
@@ -130,6 +139,41 @@ class TaskCanvasContractTests(unittest.TestCase):
         app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
 
         self.assertIn("await taskApi.autoSupplement", app)
+
+    def test_a1_drawer_is_source_first_and_has_no_model_monologue_heading(self):
+        """Break caught: the drawer could keep foregrounding the model instead of the evidence."""
+        index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+
+        self.assertNotIn("智能体如何补充", index)
+        self.assertIn("数据来源", index)
+        self.assertIn("自动校验", index)
+        self.assertLess(index.index("数据来源"), index.index("工作执行记录"))
+        self.assertIn("已自动采用·待整批确认", index)
+        self.assertIn("标记问题", index)
+
+    def test_task_ui_distinguishes_a_b_gap_c_and_failure(self):
+        """Break caught: completed automatic research could still look like blanket manual intervention."""
+        graph = (WEB_ROOT / "graph.js").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        for label in ("已自动采用·待整批确认", "已补充·建议复核", "已自动检索·等待数据", "需专家介入", "执行失败·可重试"):
+            self.assertIn(label, graph)
+        for summary in ("自动采用", "建议复核", "等待数据", "专家介入", "执行失败"):
+            self.assertIn(summary, app)
+
+    def test_batch_confirmation_modal_supports_confirm_and_cancel_paths(self):
+        """Break caught: users could not choose between bulk default review and item-by-item review."""
+        index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="batch-review"', index)
+        self.assertIn('id="batch-review-dialog"', index)
+        self.assertIn('id="confirm-batch-review"', index)
+        self.assertIn('id="cancel-batch-review"', index)
+        self.assertIn("taskApi.batchPreview", app)
+        self.assertIn("taskApi.batchReview", app)
+        self.assertIn("submitBatchReview(true)", app)
+        self.assertIn("submitBatchReview(false)", app)
 
 
 if __name__ == "__main__":

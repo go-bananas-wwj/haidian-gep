@@ -115,6 +115,15 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("supplement.manual_required", graph)
         self.assertNotIn("setInterval", graph)
 
+    def test_canvas_exposes_risk_tiers_and_batch_review_instead_of_blanket_manual_copy(self):
+        page = (Path(__file__).parents[1] / "gep" / "web" / "index.html").read_text(encoding="utf-8")
+        app = (Path(__file__).parents[1] / "gep" / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("整批确认", page)
+        self.assertIn("batch-review-preview", (Path(__file__).parents[1] / "gep" / "web" / "api.js").read_text(encoding="utf-8"))
+        self.assertIn("research_complete", app)
+        self.assertNotIn("智能体如何补充", page)
+
 
 if __name__ == "__main__":
     unittest.main()

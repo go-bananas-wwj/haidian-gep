@@ -50,6 +50,8 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(maize["unit"], "t/a")
         self.assertEqual(maize["evidence"]["table_id"], "5-11")
         self.assertEqual(maize["evidence"]["printed_page"], 71)
+        self.assertEqual(maize["review_status"], "auto_verified")
+        self.assertEqual(maize["evidence"]["risk_tier"], "A")
         self.assertNotIn("synthetic", str(maize).lower())
 
     def test_configured_task_creation_auto_queues_every_unresolved_node_once(self):
@@ -321,6 +323,22 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(source_missing["acquisition_status"], "agent_queued")
         self.assertEqual(expert["acquisition_status"], "manual_required")
         self.assertGreater(result["queued_count"], 0)
+
+    def test_research_complete_node_is_not_requeued_on_task_restore(self):
+        """Break caught: opening a task could endlessly rerun completed research gaps."""
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "R1.precipitation")
+        self.store.connection.execute(
+            "UPDATE nodes SET acquisition_status='research_complete',evidence_json=?,version=2 WHERE node_id=?",
+            (json.dumps({"current": {"risk_tier": "GAP", "result_type": "research_complete"}}), node["node_id"]),
+        )
+        self.store.connection.commit()
+
+        result = self.store.enqueue_all_supplements(task["task_id"], scheduler_version="research-v2")
+        current = self.store.node(task["task_id"], "R1.precipitation")
+
+        self.assertEqual(current["acquisition_status"], "research_complete")
+        self.assertEqual(result["skipped_by_reason"]["research_complete"], 1)
 
     def _prepare_batch_review_states(self, task_id):
         states = {
@@ -701,6 +719,18 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(reviewed["review_status"], "approved")
         with self.assertRaises(ConflictError):
             self.store.review_node(maize["node_id"], maize["version"], "approved", "other", "stale")
+
+    def test_auto_verified_node_can_be_marked_for_recheck(self):
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        maize = self.store.node(task["task_id"], "P1.maize.quantity")
+        self.store.connection.execute(
+            "UPDATE nodes SET review_status='auto_verified' WHERE node_id=?", (maize["node_id"],)
+        )
+        self.store.connection.commit()
+
+        returned = self.store.review_node(maize["node_id"], maize["version"], "returned", "reviewer", "source looks wrong")
+
+        self.assertEqual(returned["review_status"], "returned")
 
     def test_correction_invalidates_only_edited_node_review_and_emits_event(self):
         task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")

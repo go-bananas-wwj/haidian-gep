@@ -280,9 +280,15 @@ class GepStore:
             {
                 "source_id": "haidian_yearbook_2025", "source_file": "01_raw/statistics/yearbook_2025_bulletin_chapters_1_9.pdf",
                 "table_id": "5-11", "printed_page": 71, "region_code": "110108", "year": 2024,
-                "metric": "玉米产量", "source_type": "observed",
+                "metric": "玉米产量", "source_type": "observed", "risk_tier": "A",
+                "title": "《2025 北京海淀统计年鉴》", "publisher": "北京市海淀区统计局",
+                "locator": "表 5-11，第 71 页，2024 年玉米产量行",
+                "source_sha256": "56cb1dfe2efaca2b24b00fb30652cd5de37583e43134e5f6634c4e80e78990a9",
+                "source_hash_scope": "verified_extraction", "license_or_access": "local_original_only",
+                "tool_run_id": "catalog:yearbook-2024-selected", "extracted_fragment": "玉米产量：2935.1 吨",
+                "explanation": "本地准入记录与节点、区域、年度和单位精确匹配。",
             },
-            "acquired", "pending_review", "applicable",
+            "acquired", "auto_verified", "applicable",
         )
         for card in method_cards():
             for field in card.required_fields:
@@ -510,12 +516,12 @@ class GepStore:
         if decision not in {"approved", "returned"} or not reviewer.strip() or not note.strip():
             raise ValueError("decision, reviewer, and note are required")
         row = self._node_by_id(node_id)
-        if row["version"] != expected_version or row["review_status"] != "pending_review":
+        if row["version"] != expected_version or row["review_status"] not in {"pending_review", "auto_verified"}:
             raise ConflictError("node version is stale or not awaiting review")
         status = "approved" if decision == "approved" else "returned"
         with self.connection:
             updated = self.connection.execute(
-                "UPDATE nodes SET review_status=? WHERE node_id=? AND version=? AND review_status='pending_review'",
+                "UPDATE nodes SET review_status=? WHERE node_id=? AND version=? AND review_status IN ('pending_review','auto_verified')",
                 (status, node_id, expected_version),
             )
             if updated.rowcount != 1:
@@ -850,6 +856,9 @@ class GepStore:
                 if not (scheduler_version == "research-v2" and current.get("reason_code") == "source_missing"):
                     skip("manual_required")
                     continue
+            if node["acquisition_status"] == "research_complete":
+                skip("research_complete")
+                continue
             if node["kind"] == "input":
                 parent = by_key.get(node["parent_key"])
                 if parent and parent["applicability_status"] in {"not_applicable", "verified_zero"}:

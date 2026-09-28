@@ -124,12 +124,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('id="execute-run"', page["html"])
 
-    def test_root_exposes_a_real_supplement_request_action(self):
-        """Break caught: a missing input could not enter the durable evidence-gated supplement workflow."""
+    def test_root_exposes_the_automatic_research_workflow(self):
+        """Break caught: a missing input could not enter the durable evidence-gated research workflow."""
         status, page, _ = self.request("GET", "/")
 
         self.assertEqual(status, 200)
-        self.assertIn("请求智能体补充", page["html"])
+        self.assertIn("智能体会自动检索、提取、校验并分级", page["html"])
 
     def test_root_renders_parent_run_lineage_in_result_review(self):
         """Break caught: a revised run could hide its immutable predecessor from the result-review page."""
@@ -157,7 +157,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(item["region_code"], "110108")
         self.assertEqual(item["year"], 2024)
         self.assertEqual(item["graph_version"], 1)
-        self.assertEqual(item["pending_review_count"], 1)
+        self.assertEqual(item["pending_review_count"], 0)
         self.assertGreater(item["node_blocker_count"], 0)
         self.assertIn("formal_blocker_count", item)
         self.assertGreater(item["formal_blocker_count"], 0)
