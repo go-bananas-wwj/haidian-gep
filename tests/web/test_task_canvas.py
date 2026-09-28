@@ -30,6 +30,10 @@ class TaskCanvasContractTests(unittest.TestCase):
             server.server_close()
         self.assertIn(".canvas", stylesheet)
 
+    def test_page_uses_an_embedded_icon_without_a_failing_favicon_request(self):
+        index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('rel="icon" href="data:image/svg+xml', index)
+
     def test_five_step_evidence_first_workflow_is_present(self):
         index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
         for label in ("任务中心", "数据准备", "核算方案", "执行核算", "结果与交付"):
