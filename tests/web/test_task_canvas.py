@@ -91,6 +91,8 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertRegex(styles, r"@media\s*\(max-width:\s*600px\)[\s\S]*\.detail-drawer[^{]*\{[^}]*width:\s*(100%|min\()")
         self.assertIn('event.key === "Escape"', app)
         self.assertIn("lastDrawerTrigger", app)
+        self.assertIn("drawerRequestVersion", app)
+        self.assertIn("requestVersion !== drawerRequestVersion", app)
 
     def test_persisted_events_flow_along_svg_edges(self):
         """Break caught: progress could be represented by a generic card flash instead of its real dependency path."""

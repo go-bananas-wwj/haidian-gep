@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import math
 from typing import Any, Mapping
 
 from .deepseek import DeepSeekWorkflow
@@ -29,6 +30,25 @@ class EvidenceAwareWorkflow:
         result = self.provider.run(scoped_order)
         if not isinstance(result, dict):
             raise ValueError("supplement provider must return a JSON object")
+        direct = evidence[0] if len(evidence) == 1 else None
+        direct_value = direct.get("value") if direct else None
+        if (direct and work_order.get("node_kind") == "input"
+                and direct.get("metric") == work_order.get("node_label")
+                and direct.get("raw_status") == "observed"
+                and isinstance(direct_value, (int, float)) and not isinstance(direct_value, bool)
+                and math.isfinite(direct_value) and str(direct.get("unit") or "").strip()):
+            explanation = result.get("explanation")
+            if not isinstance(explanation, str) or not explanation.strip():
+                raise ValueError("supplement provider did not explain the admitted observation")
+            evidence_fields = (
+                "source_id", "source_type", "locator", "source_sha256", "license_or_access",
+                "tool_run_id", "extracted_fragment",
+            )
+            return {
+                "outcome": "candidate", "value": direct_value, "unit": direct["unit"],
+                "explanation": explanation.strip(),
+                "evidence": {key: direct[key] for key in evidence_fields},
+            }
         outcome = result.get("outcome", "candidate")
         if outcome in {"candidate", "applicability_candidate"}:
             citation = result.get("evidence")

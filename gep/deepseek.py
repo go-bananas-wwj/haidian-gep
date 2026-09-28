@@ -8,6 +8,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
+SYSTEM_PROMPT = """Return one JSON object only. Use only records in allowed_evidence. Never approve a node, invent a local value, use outside knowledge as evidence, or calculate formal GEP.
+For an input node with one direct non-null admitted record, return exactly this shape: {"outcome":"candidate","value":number,"unit":"copy admitted unit","explanation":"Chinese evidence summary and review cautions","evidence":{"source_id":"copy exactly","source_type":"copy exactly","locator":"copy exactly","source_sha256":"copy exactly","license_or_access":"copy exactly","tool_run_id":"copy exactly","extracted_fragment":"copy exactly"}}.
+For an indicator node only when admitted evidence supports an applicability proposal, return: {"outcome":"applicability_candidate","applicability_status":"applicable|not_applicable|verified_zero","explanation":"Chinese explanation and review cautions","evidence":{"source_id":"copy exactly","source_type":"copy exactly","locator":"copy exactly","source_sha256":"copy exactly","license_or_access":"copy exactly","tool_run_id":"copy exactly","extracted_fragment":"copy exactly"}}.
+If evidence is blank, indirect, conflicting, insufficient, or cannot support the requested field, return: {"outcome":"manual_required","reason_code":"source_missing|scope_conflict|permission_required|insufficient_evidence","explanation":"Chinese summary of checked evidence and exact human next step"}.
+Do not add keys outside the selected shape. Copy evidence identity fields character-for-character from one allowed_evidence record. Output JSON, not Markdown."""
+
+
 class DeepSeekWorkflow:
     """Call DeepSeek JSON Output without granting it review authority."""
 
@@ -46,10 +53,7 @@ class DeepSeekWorkflow:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "Return one JSON object only. Use only evidence supplied in the work order. "
-                        "Never approve a node, invent a local value, or perform formal GEP calculation."
-                    ),
+                    "content": SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",

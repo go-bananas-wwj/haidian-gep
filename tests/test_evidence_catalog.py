@@ -15,18 +15,22 @@ class EvidenceCatalogTests(unittest.TestCase):
         source_hash = "a" * 64
         observation = {
             "region_code": "110108", "year": "2024", "metric": "玉米产量", "value": 2935.1,
-            "unit": "吨", "source_id": "haidian_yearbook_2025", "source_type": "observed",
-            "source_file": "01_raw/statistics/yearbook.pdf", "table_id": "5-11", "printed_page": "71",
-            "sha256": source_hash, "status": "pending_review",
+            "unit": "吨", "source_type": "observed",
+            "source_file": "01_raw/statistics/yearbook_2025_selected.pdf", "table_id": "5-11", "printed_page": "71",
+            "status": "pending_review",
         }
         pending = {
             "region_code": "110108", "year": "2024", "metric": "水产品产量", "value": None,
-            "unit": "吨", "source_id": "haidian_yearbook_2025", "source_type": "blank_unresolved",
-            "source_file": "01_raw/statistics/yearbook.pdf", "table_id": "5-5", "printed_page": "67",
-            "sha256": source_hash, "status": "pending_review", "note": "原表空白",
+            "unit": "吨", "source_type": "blank_unresolved",
+            "source_file": "01_raw/statistics/yearbook_2025_selected.pdf", "table_id": "5-5", "printed_page": "67",
+            "status": "pending_review", "note": "原表空白",
         }
         (self.release / "observations.json").write_text(json.dumps([observation], ensure_ascii=False), encoding="utf-8")
         (self.release / "pending.json").write_text(json.dumps([pending], ensure_ascii=False), encoding="utf-8")
+        (self.release / "provenance.json").write_text(json.dumps({"source_extraction_sha256": source_hash}), encoding="utf-8")
+        (self.release / "source_receipts.json").write_text(json.dumps({
+            "sources": [{"source_id": "haidian_yearbook_2025", "path": "01_raw/statistics/haidian_yearbook_2025.zip"}],
+        }), encoding="utf-8")
         with (self.release / "missing_inputs.csv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(["indicator_id", "indicator_name", "status", "missing_inputs"])
@@ -88,6 +92,33 @@ class EvidenceCatalogTests(unittest.TestCase):
 
 
 class EvidenceAwareWorkflowTests(unittest.TestCase):
+    def test_exact_observed_record_builds_candidate_deterministically(self):
+        """Break caught: model wording variability could discard an exact admitted observation."""
+        from gep.supplement import EvidenceAwareWorkflow
+
+        allowed = {
+            "source_id": "yearbook", "source_type": "observed", "source_sha256": "a" * 64,
+            "locator": "表 5-11，印刷页 71", "license_or_access": "review",
+            "tool_run_id": "catalog-1", "extracted_fragment": "玉米产量 2935.1 吨",
+            "metric": "玉米产量", "value": 2935.1, "unit": "吨", "raw_status": "observed",
+        }
+
+        class Catalog:
+            def for_work_order(self, _work_order):
+                return [allowed]
+
+        class Provider:
+            def run(self, _work_order):
+                return {"outcome": "manual_required", "reason_code": "insufficient_evidence", "explanation": "请人工复核年鉴行。"}
+
+        result = EvidenceAwareWorkflow(Provider(), Catalog()).run({"node_kind": "input", "node_label": "玉米产量"})
+
+        self.assertEqual(result["outcome"], "candidate")
+        self.assertEqual(result["value"], 2935.1)
+        self.assertEqual(result["unit"], "吨")
+        self.assertEqual(result["explanation"], "请人工复核年鉴行。")
+        self.assertEqual(result["evidence"]["source_id"], "yearbook")
+
     def test_skips_provider_without_evidence(self):
         """Break caught: the system could spend model calls or invent values with no admitted source."""
         from gep.supplement import EvidenceAwareWorkflow

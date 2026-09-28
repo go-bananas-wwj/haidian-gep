@@ -5,6 +5,7 @@ import { renderMap } from "./map.js";
 const $ = selector => document.querySelector(selector);
 const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, supplementKeys:{}, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, appendix:null };
 let lastDrawerTrigger = null;
+let drawerRequestVersion = 0;
 const notice = text => { $("#notice").textContent = text; };
 const escape = value => String(value ?? "").replace(/[&<>"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[char]));
 
@@ -78,6 +79,7 @@ function showDrawer(trigger) {
 }
 function closeDrawer({ restoreFocus = true } = {}) {
   const overlay = $("#drawer-overlay"); const drawer = $("#detail-drawer");
+  drawerRequestVersion += 1;
   if (!overlay || overlay.hidden) return;
   overlay.classList.remove("open"); drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true");
   state.selected = null; state.selectedIndicator = null; state.drawerMode = null;
@@ -87,6 +89,7 @@ function closeDrawer({ restoreFocus = true } = {}) {
   lastDrawerTrigger = null;
 }
 function openIndicatorDrawer(node, description, trigger = document.activeElement) {
+  drawerRequestVersion += 1;
   const current = state.nodes.find(item => item.node_id === node.node_id) || node;
   state.selected = current; state.selectedIndicator = current; state.selectedDescription = description || "按核算要素、来源和审核状态组织数据支路。"; state.drawerMode = "indicator";
   $("#drawer-title").textContent = `${current.node_key} · ${current.label}`; $("#drawer-status").textContent = nodeState(current)[0];
@@ -113,8 +116,10 @@ function methodHtml(node) {
   const e = node.evidence || {}; return `适用性：${escape(node.applicability_status)}<br>方法：${escape(e.method_id || "方法卡待人工确认")}<br>标准条款：${escape(e.standard_clause || "待补充")}<br>当前状态：${escape(nodeState(node)[0])}`;
 }
 async function openEvidenceDrawer(node, parentIndicator = state.selectedIndicator, trigger = document.activeElement) {
+  const requestVersion = ++drawerRequestVersion;
   try {
     const evidence = await taskApi.evidence(node.node_id); const [label] = nodeState(evidence);
+    if (requestVersion !== drawerRequestVersion) return;
     state.selected = evidence; state.selectedIndicator = parentIndicator; state.drawerMode = "evidence";
     $("#drawer-title").textContent = `${evidence.node_key} · ${evidence.label}`; $("#drawer-status").textContent = `${label} · 输入版本 ${evidence.version}`;
     $("#evidence-value").textContent = evidence.value === null ? "待补充" : evidence.value; $("#evidence-unit").textContent = evidence.unit || "";
@@ -128,7 +133,7 @@ async function openEvidenceDrawer(node, parentIndicator = state.selectedIndicato
     }
     for (const [kind, labelText] of [["upload", "上传材料"], ["estimate", "填写估计依据"], ["defer", "暂缓处理"]]) { const button = document.createElement("button"); button.textContent = labelText; button.onclick = () => openAssist(kind, evidence); actions.append(button); }
     $("#drawer-back").hidden = !parentIndicator; $("#drawer-indicator-view").hidden = true; $("#drawer-evidence-view").hidden = false; showDrawer(trigger);
-  } catch (error) { notice(`读取证据失败：${error.message}`); }
+  } catch (error) { if (requestVersion === drawerRequestVersion) notice(`读取证据失败：${error.message}`); }
 }
 function reviewButton(evidence, decision, label, primary = false) {
   const button = document.createElement("button"); button.textContent = label; if (primary) button.className = "primary";

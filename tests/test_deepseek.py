@@ -49,6 +49,10 @@ class DeepSeekWorkflowTests(unittest.TestCase):
         self.assertEqual(payload["thinking"], {"type": "disabled"})
         self.assertFalse(payload["stream"])
         self.assertIn("JSON", payload["messages"][0]["content"])
+        self.assertIn('"outcome":"candidate"', payload["messages"][0]["content"])
+        self.assertIn('"outcome":"applicability_candidate"', payload["messages"][0]["content"])
+        self.assertIn('"outcome":"manual_required"', payload["messages"][0]["content"])
+        self.assertIn("source_sha256", payload["messages"][0]["content"])
         self.assertEqual(json.loads(payload["messages"][1]["content"])["node_id"], "node-1")
         self.assertEqual(actual, result)
 

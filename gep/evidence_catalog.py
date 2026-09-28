@@ -44,8 +44,10 @@ class EvidenceCatalog:
         return "，".join(pieces) or str(record.get("locator") or "准入记录")
 
     @classmethod
-    def _normalize_record(cls, record: dict[str, Any]) -> dict[str, Any]:
-        source_hash = str(record.get("source_sha256") or record.get("sha256") or "").lower()
+    def _normalize_record(
+        cls, record: dict[str, Any], *, fallback_source_id: str = "", fallback_source_hash: str = "",
+    ) -> dict[str, Any]:
+        source_hash = str(record.get("source_sha256") or record.get("sha256") or fallback_source_hash).lower()
         metric = str(record.get("metric") or "")
         value = record.get("value")
         unit = str(record.get("unit") or "")
@@ -53,12 +55,12 @@ class EvidenceCatalog:
         if record.get("note"):
             fragment = f"{fragment}；{record['note']}"
         return {
-            "source_id": str(record.get("source_id") or ""),
-            "source_type": str(record.get("source_type") or record.get("raw_status") or "admitted_record"),
+            "source_id": str(record.get("source_id") or fallback_source_id),
+            "source_type": str(record.get("source_type") or record.get("raw_status") or record.get("status") or "admitted_record"),
             "source_file": str(record.get("source_file") or ""),
             "locator": cls._locator(record),
             "source_sha256": source_hash,
-            "license_or_access": str(record.get("license_or_access") or "admitted-reference-review"),
+            "license_or_access": str(record.get("license_or_access") or record.get("source_distribution") or "admitted-reference-review"),
             "tool_run_id": f"catalog:{hashlib.sha256(fragment.encode()).hexdigest()[:16]}",
             "extracted_fragment": fragment,
             "metric": metric,
@@ -106,11 +108,24 @@ class EvidenceCatalog:
             return []
         region_code = str(work_order.get("region_code") or "")
         year = str(work_order.get("year") or "")
+        provenance_path = release_root / "provenance.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8")) if provenance_path.is_file() else {}
+        extraction_hash = str(provenance.get("source_extraction_sha256") or "")
+        receipts_path = release_root / "source_receipts.json"
+        receipts_payload = json.loads(receipts_path.read_text(encoding="utf-8")) if receipts_path.is_file() else {}
+        receipts = receipts_payload.get("sources", []) if isinstance(receipts_payload, dict) else []
         matches = []
         for filename in ("observations.json", "pending.json"):
             for record in self._json_list(release_root / filename):
                 if (str(record.get("region_code") or "") == region_code
                         and str(record.get("year") or "") == year
                         and str(record.get("metric") or "") == metric):
-                    matches.append(self._normalize_record(record))
+                    source_file = str(record.get("source_file") or "")
+                    receipt = next((item for item in receipts if isinstance(item, dict)
+                                    and "yearbook_2025" in source_file and "yearbook_2025" in str(item.get("path") or "")), {})
+                    matches.append(self._normalize_record(
+                        record,
+                        fallback_source_id=str(receipt.get("source_id") or ""),
+                        fallback_source_hash=extraction_hash or str(receipt.get("sha256") or ""),
+                    ))
         return matches
