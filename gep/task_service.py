@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from .methods import method_cards
 from .runs import evaluate_frozen_graph
+from .smart_data import SmartDataStore
 
 
 INDICATORS = (
@@ -76,6 +77,7 @@ class GepStore:
         self.supplement_workflow = supplement_workflow or UnconfiguredSupplementWorkflow()
         self.auto_enqueue_on_create = auto_enqueue_on_create
         self._create_schema()
+        self.smart_data = SmartDataStore(self.connection)
 
     def close(self) -> None:
         self.connection.close()
