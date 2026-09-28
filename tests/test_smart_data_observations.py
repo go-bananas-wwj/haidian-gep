@@ -152,6 +152,7 @@ class SmartDataObservationBuilderTests(unittest.TestCase):
         self.assertIn("precipitation", {item["metric"] for item in observations})
         self.assertIn("actual_et", {item["metric"] for item in observations})
         self.assertIn("slope_mean", {item["metric"] for item in observations})
+        self.assertTrue(all(not Path(item["artifact_path"]).is_absolute() for item in observations if item.get("artifact_path")))
 
         loaded = load_observation_manifest(output)
         self.assertEqual(len(loaded), 10)

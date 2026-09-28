@@ -95,8 +95,15 @@ def main() -> None:
             *build_cover_observations(covers[0], asset_id=asset_id(covers[0], "worldcover-2021"),
                                       year=args.year, region_code=args.region_code),
         ]
+        records=[]
+        for item in built:
+            record=item.as_dict()
+            if record.get("artifact_path"):
+                artifact=Path(record["artifact_path"])
+                if artifact.is_absolute() and artifact.is_relative_to(root): record["artifact_path"]=artifact.relative_to(root).as_posix()
+            records.append(record)
         output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps([item.as_dict() for item in built], ensure_ascii=False, indent=2), encoding="utf-8")
+        output.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
         payload = {"observation_count": len(built), "output": str(output)}
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
