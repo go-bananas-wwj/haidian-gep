@@ -4,6 +4,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gep.task_service import GepStore
 
@@ -15,8 +16,8 @@ class SupplementWorkerTests(unittest.TestCase):
 
         sentinel = object()
         worker = SupplementWorker("unused.sqlite3")
-        with unittest.mock.patch("gep.worker.workflow_from_environment", return_value=sentinel) as factory, \
-                unittest.mock.patch("gep.worker.GepStore") as store_class:
+        with patch("gep.worker.workflow_from_environment", return_value=sentinel) as factory, \
+                patch("gep.worker.GepStore") as store_class:
             store_class.return_value.process_next_supplement.return_value = None
             worker.run_once()
 

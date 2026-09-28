@@ -556,10 +556,39 @@ class GepStore:
         return [{**dict(row), "payload": json.loads(row["payload_json"]), "payload_json": None} for row in rows]
 
     @staticmethod
-    def _candidate_from_workflow(payload: Any) -> dict[str, Any]:
-        """Accept only a fully traceable, JSON-safe candidate from an agent workflow."""
+    def _workflow_result(payload: Any, node_kind: str) -> dict[str, Any]:
+        """Accept only a supported, JSON-safe result from an agent workflow."""
         if not isinstance(payload, dict):
             raise ValueError("workflow response must be a JSON object")
+        outcome = payload.get("outcome", "candidate")
+        explanation = payload.get("explanation")
+        if not isinstance(explanation, str) or not explanation.strip():
+            raise ValueError("workflow result requires an explanation")
+        if outcome == "manual_required":
+            reason_code = payload.get("reason_code")
+            if not isinstance(reason_code, str) or not reason_code.strip():
+                raise ValueError("manual intervention requires a reason code")
+            return {
+                "outcome": outcome,
+                "reason_code": reason_code.strip(),
+                "explanation": explanation.strip(),
+            }
+        if outcome == "applicability_candidate":
+            if node_kind != "indicator":
+                raise ValueError("applicability candidates require an indicator node")
+            applicability = payload.get("applicability_status")
+            if applicability not in {"applicable", "not_applicable", "verified_zero"}:
+                raise ValueError("workflow applicability status is invalid")
+            evidence = payload.get("evidence")
+            GepStore._validated_workflow_evidence(evidence)
+            return {
+                "outcome": outcome,
+                "applicability_status": applicability,
+                "explanation": explanation.strip(),
+                "evidence": evidence,
+            }
+        if outcome != "candidate" or node_kind != "input":
+            raise ValueError("workflow outcome is not valid for this node")
         value = payload.get("value")
         if value is None:
             raise ValueError("workflow candidate requires a non-null value")
@@ -568,12 +597,20 @@ class GepStore:
         except (TypeError, ValueError) as error:
             raise ValueError("workflow candidate value must be JSON-safe") from error
         unit = payload.get("unit")
-        explanation = payload.get("explanation")
         evidence = payload.get("evidence")
         if not isinstance(unit, str) or not unit.strip():
             raise ValueError("workflow candidate requires a unit")
-        if not isinstance(explanation, str) or not explanation.strip():
-            raise ValueError("workflow candidate requires an explanation")
+        evidence = GepStore._validated_workflow_evidence(evidence)
+        return {
+            "outcome": "candidate",
+            "value": value,
+            "unit": unit.strip(),
+            "explanation": explanation.strip(),
+            "evidence": evidence,
+        }
+
+    @staticmethod
+    def _validated_workflow_evidence(evidence: Any) -> dict[str, Any]:
         if not isinstance(evidence, dict):
             raise ValueError("workflow candidate requires structured evidence")
         required_evidence = (
@@ -585,22 +622,21 @@ class GepStore:
         source_sha256 = str(evidence["source_sha256"])
         if len(source_sha256) != 64 or any(character not in "0123456789abcdef" for character in source_sha256.lower()):
             raise ValueError("workflow evidence requires a SHA-256 source hash")
-        return {
-            "value": value,
-            "unit": unit.strip(),
-            "explanation": explanation.strip(),
-            "evidence": {**evidence, "source_sha256": source_sha256.lower()},
-        }
+        return {**evidence, "source_sha256": source_sha256.lower()}
+
+    _candidate_from_workflow = _workflow_result
 
     def _supplement_work_order(self, task_id: str, node: sqlite3.Row) -> dict[str, Any]:
         graph = self.graph(task_id)
         task = graph["task"]
-        indicator_id = node["parent_key"]
+        indicator_id = node["node_key"] if node["kind"] == "indicator" else node["parent_key"]
         card = METHOD_CARDS.get(indicator_id)
         return {
             "task_id": task_id,
             "node_id": node["node_id"],
             "node_key": node["node_key"],
+            "node_label": node["label"],
+            "node_kind": node["kind"],
             "indicator_id": indicator_id,
             "method_id": card.method_id if card else None,
             "required_fields": list(card.required_fields) if card else [],
@@ -707,10 +743,13 @@ class GepStore:
         task_id, node_id = job["task_id"], job["node_id"]
         node = self._node_by_id(node_id)
         try:
-            candidate = self._candidate_from_workflow(self.supplement_workflow.run(self._supplement_work_order(task_id, node)))
+            candidate = self._workflow_result(
+                self.supplement_workflow.run(self._supplement_work_order(task_id, node)), node["kind"],
+            )
         except (OSError, RuntimeError, ValueError) as error:
-            reason = str(error)
-            is_unconfigured = "not configured" in reason
+            original_reason = str(error)
+            is_unconfigured = "not configured" in original_reason
+            reason = original_reason if is_unconfigured else "supplement workflow failed; inspect provider health and retry"
             status = "blocked" if is_unconfigured else "failed"
             acquisition_status = "awaiting_agent" if is_unconfigured else "agent_failed"
             event_type = "supplement.blocked" if is_unconfigured else "supplement.failed"
@@ -724,6 +763,35 @@ class GepStore:
             return {"job_id": job_id, "status": status, "reason": reason}
 
         current_evidence = json.loads(node["evidence_json"])
+        next_version = node["version"] + 1
+        if candidate["outcome"] == "manual_required":
+            manual_evidence = {
+                "reason_code": candidate["reason_code"],
+                "explanation": candidate["explanation"],
+                "result_type": "manual_required",
+                "received_utc": _utc_now(),
+            }
+            combined_evidence = {"original": current_evidence, "current": manual_evidence}
+            try:
+                with self.connection:
+                    self.connection.execute(
+                        "UPDATE supplement_jobs SET status='manual_required',reason='human evidence or decision required',updated_utc=? WHERE job_id=? AND status='running'",
+                        (_utc_now(), job_id),
+                    )
+                    updated = self.connection.execute(
+                        "UPDATE nodes SET evidence_json=?,acquisition_status='manual_required',review_status='unsubmitted',version=? WHERE node_id=? AND version=?",
+                        (json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
+                    )
+                    if updated.rowcount != 1:
+                        raise ConflictError("node version is stale")
+                    self._bump_graph_version(task_id)
+                    self._event(task_id, node_id, "supplement.manual_required", {
+                        "job_id": job_id, "version": next_version, "reason_code": candidate["reason_code"],
+                    })
+            except ConflictError as error:
+                return self._mark_supplement_stale(job_id, task_id, node_id, error)
+            return {"job_id": job_id, "status": "manual_required", "reason": "human evidence or decision required"}
+
         candidate_evidence = {
             **candidate["evidence"],
             "explanation": candidate["explanation"],
@@ -731,18 +799,24 @@ class GepStore:
             "received_utc": _utc_now(),
         }
         combined_evidence = {"original": current_evidence, "current": candidate_evidence}
-        next_version = node["version"] + 1
         try:
             with self.connection:
                 self.connection.execute(
                     "UPDATE supplement_jobs SET status='completed_pending_review',reason='candidate persisted; human review required',updated_utc=? WHERE job_id=? AND status='running'",
                     (_utc_now(), job_id),
                 )
-                updated = self.connection.execute(
-                    "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,acquisition_status='candidate_ready',review_status='pending_review',version=? WHERE node_id=? AND version=?",
-                    (json.dumps(candidate["value"], ensure_ascii=False, allow_nan=False), candidate["unit"],
-                     json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
-                )
+                if candidate["outcome"] == "applicability_candidate":
+                    updated = self.connection.execute(
+                        "UPDATE nodes SET evidence_json=?,applicability_status=?,acquisition_status='candidate_ready',review_status='pending_review',version=? WHERE node_id=? AND version=?",
+                        (json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), candidate["applicability_status"],
+                         next_version, node_id, node["version"]),
+                    )
+                else:
+                    updated = self.connection.execute(
+                        "UPDATE nodes SET value_json=?,unit=?,evidence_json=?,acquisition_status='candidate_ready',review_status='pending_review',version=? WHERE node_id=? AND version=?",
+                        (json.dumps(candidate["value"], ensure_ascii=False, allow_nan=False), candidate["unit"],
+                         json.dumps(combined_evidence, ensure_ascii=False, sort_keys=True), next_version, node_id, node["version"]),
+                    )
                 if updated.rowcount != 1:
                     raise ConflictError("node version is stale")
                 self._bump_graph_version(task_id)
@@ -751,14 +825,20 @@ class GepStore:
                     "source_sha256": candidate["evidence"]["source_sha256"], "tool_run_id": candidate["evidence"]["tool_run_id"],
                 })
         except ConflictError as error:
-            with self.connection:
-                self.connection.execute(
-                    "UPDATE supplement_jobs SET status='stale',reason=?,updated_utc=? WHERE job_id=?",
-                    (str(error), _utc_now(), job_id),
-                )
-                self._event(task_id, node_id, "supplement.stale", {"job_id": job_id, "reason": str(error)})
-            return {"job_id": job_id, "status": "stale", "reason": str(error)}
+            return self._mark_supplement_stale(job_id, task_id, node_id, error)
         return {"job_id": job_id, "status": "completed_pending_review", "reason": "candidate persisted; human review required"}
+
+    def _mark_supplement_stale(
+        self, job_id: str, task_id: str, node_id: str, error: ConflictError,
+    ) -> dict[str, str]:
+        reason = str(error)
+        with self.connection:
+            self.connection.execute(
+                "UPDATE supplement_jobs SET status='stale',reason=?,updated_utc=? WHERE job_id=?",
+                (reason, _utc_now(), job_id),
+            )
+            self._event(task_id, node_id, "supplement.stale", {"job_id": job_id, "reason": reason})
+        return {"job_id": job_id, "status": "stale", "reason": reason}
 
     def create_snapshot(self, task_id: str) -> dict[str, str]:
         graph = self.graph(task_id)

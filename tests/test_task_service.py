@@ -153,6 +153,81 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(current["acquisition_status"], "agent_failed")
         self.assertIn("supplement.failed", [event["type"] for event in self.store.events(task["task_id"])])
 
+    def test_workflow_persists_an_applicability_candidate_for_review(self):
+        """Break caught: a model applicability opinion could be lost or treated as already approved."""
+        class Workflow:
+            def run(self, _work_order):
+                return {
+                    "outcome": "applicability_candidate", "applicability_status": "not_applicable",
+                    "explanation": "海淀区为内陆行政区，需人工核对边界证据。",
+                    "evidence": {
+                        "source_id": "boundary-register", "source_type": "official_boundary",
+                        "locator": "district=110108", "source_sha256": "c" * 64,
+                        "license_or_access": "internal-review", "tool_run_id": "deepseek-1",
+                        "extracted_fragment": "海淀区行政边界",
+                    },
+                }
+
+        self.store.close()
+        self.store = GepStore(Path(self.directory.name) / "tasks.sqlite3", supplement_workflow=Workflow())
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "R4")
+        self.store.request_supplement(task["task_id"], node["node_id"], "applicability-1")
+
+        job = self.store.process_next_supplement()
+        current = self.store.node(task["task_id"], "R4")
+
+        self.assertEqual(job["status"], "completed_pending_review")
+        self.assertEqual(current["value"], None)
+        self.assertEqual(current["applicability_status"], "not_applicable")
+        self.assertEqual(current["review_status"], "pending_review")
+        self.assertEqual(current["acquisition_status"], "candidate_ready")
+
+    def test_workflow_persists_manual_intervention_without_a_value(self):
+        """Break caught: a missing source could remain pending forever or be converted to zero."""
+        class Workflow:
+            def run(self, _work_order):
+                return {
+                    "outcome": "manual_required", "reason_code": "source_missing",
+                    "explanation": "未找到 2024 年生产者价格，需要人工提供价格台账。",
+                }
+
+        self.store.close()
+        self.store = GepStore(Path(self.directory.name) / "tasks.sqlite3", supplement_workflow=Workflow())
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.store.request_supplement(task["task_id"], node["node_id"], "manual-required-1")
+
+        job = self.store.process_next_supplement()
+        current = self.store.node(task["task_id"], "P1.maize.producer_price")
+        events = self.store.events(task["task_id"])
+
+        self.assertEqual(job["status"], "manual_required")
+        self.assertEqual(current["value"], None)
+        self.assertEqual(current["acquisition_status"], "manual_required")
+        self.assertEqual(current["review_status"], "unsubmitted")
+        self.assertEqual(current["evidence"]["current"]["reason_code"], "source_missing")
+        self.assertIn("supplement.manual_required", [event["type"] for event in events])
+
+    def test_workflow_failure_reason_does_not_persist_raw_provider_text(self):
+        """Break caught: a provider exception could leak a response body into SQLite events."""
+        class Workflow:
+            def run(self, _work_order):
+                raise RuntimeError("raw-provider-body-with-secret")
+
+        self.store.close()
+        self.store = GepStore(Path(self.directory.name) / "tasks.sqlite3", supplement_workflow=Workflow())
+        task = self.store.create_task("110108", 2024, "b1", "GB/T 46869-2025", "reference-2024-v0.1")
+        node = self.store.node(task["task_id"], "P1.maize.producer_price")
+        self.store.request_supplement(task["task_id"], node["node_id"], "failure-redaction-1")
+
+        job = self.store.process_next_supplement()
+        events = self.store.events(task["task_id"])
+
+        self.assertEqual(job["status"], "failed")
+        self.assertNotIn("raw-provider-body-with-secret", str(job))
+        self.assertNotIn("raw-provider-body-with-secret", str(events))
+
     def test_existing_task_database_migrates_to_include_graph_version(self):
         """Break caught: the deployed pre-versioned SQLite task table could not support task-center summaries."""
         legacy_path = Path(self.directory.name) / "legacy-tasks.sqlite3"
