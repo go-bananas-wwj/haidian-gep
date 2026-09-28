@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from .deepseek import DeepSeekWorkflow
 from .dify import DifyWorkflow
 from .evidence_catalog import EvidenceCatalog
+from .geo.aef_tool import AefSpatialTool
 from .official_sources import OfficialSourceRegistry
 from .research import ResearchWorkflow
 from .task_service import SupplementWorkflow
@@ -37,7 +38,9 @@ def workflow_from_environment(
         if workflow is None:
             raise ValueError("DeepSeek provider requires DEEPSEEK_API_KEY")
         data_root = environment.get("GEP_DATA_ROOT", "").strip()
-        return ResearchWorkflow(workflow, EvidenceCatalog(data_root), OfficialSourceRegistry()) if data_root else workflow
+        return ResearchWorkflow(
+            workflow, EvidenceCatalog(data_root), OfficialSourceRegistry(), AefSpatialTool(data_root),
+        ) if data_root else workflow
     if provider == "dify":
         workflow = DifyWorkflow.from_environment(environment)
         if workflow is None:

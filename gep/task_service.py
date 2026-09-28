@@ -902,6 +902,12 @@ class GepStore:
                     if updated.rowcount != 1:
                         raise ConflictError("node version is stale")
                     self._bump_graph_version(task_id)
+                    if isinstance(candidate.get("aef_result"), dict) and candidate["aef_result"].get("status") != "not_applicable":
+                        self._event(task_id, node_id, "aef.inspected", {
+                            "job_id": job_id, "status": candidate["aef_result"].get("status"),
+                            "missing_prerequisites": candidate["aef_result"].get("missing_prerequisites", []),
+                            "vrt_sha256": candidate["aef_result"].get("vrt_sha256"),
+                        })
                     self._event(task_id, node_id, "research.completed", {
                         "job_id": job_id, "version": next_version, "risk_tier": "GAP",
                         "searched_tools": candidate["searched_tools"],
