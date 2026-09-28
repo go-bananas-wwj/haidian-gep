@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from gep.smart_data.aef_pipeline import build_aef_subset, plan_aef_subset
+from gep.smart_data.aef_pipeline import build_aef_subset, load_boundary_descriptor, plan_aef_subset
 from gep.smart_data.aef_classifier import (
     align_worldcover_labels, build_area_observations, classify_aef, train_aef_classifier,
 )
@@ -43,7 +43,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.stage == "aef":
         root = Path(args.data_root)
-        boundary = json.loads(Path(args.boundary).read_text(encoding="utf-8"))
+        boundary = load_boundary_descriptor(Path(args.boundary))
         indexes = [Path(args.index)] if args.index else sorted(root.glob("**/aef_index.parquet"))
         if len(indexes) != 1:
             parser.error("exactly one AEF index is required")

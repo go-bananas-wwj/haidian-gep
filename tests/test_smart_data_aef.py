@@ -19,6 +19,9 @@ from gep.smart_data.aef_pipeline import (
     AEF_ATTRIBUTION,
     AefSubsetPlan,
     build_aef_subset,
+    download_remote_vrt,
+    load_boundary_descriptor,
+    rewrite_remote_vrt,
     plan_aef_subset,
 )
 from gep.smart_data.aef_classifier import (
@@ -37,13 +40,16 @@ from gep.task_service import GepStore
 FIXTURES = Path(__file__).parent / "fixtures" / "smart_data" / "aef"
 
 
-def write_tile(path: Path, *, west: float, north: float, value: int, nodata_pixel=False):
+def write_tile(path: Path, *, west: float, north: float, value: int, nodata_pixel=False, bottom_up=False):
     values = np.full((64, 4, 4), value, dtype="int8")
     if nodata_pixel:
         values[:, 0, 0] = -128
+    if bottom_up:
+        values[:] = np.arange(1, 5, dtype="int8")[None, :, None]
+    transform = rasterio.Affine(10, 0, west, 0, 10, north - 40) if bottom_up else from_origin(west, north, 10, 10)
     with rasterio.open(
         path, "w", driver="GTiff", width=4, height=4, count=64, dtype="int8",
-        crs="EPSG:32650", transform=from_origin(west, north, 10, 10), nodata=-128,
+        crs="EPSG:32650", transform=transform, nodata=-128,
     ) as dataset:
         dataset.write(values)
         for band in range(1, 65):
@@ -79,6 +85,37 @@ class SmartDataAefPipelineTests(unittest.TestCase):
         self.assertTrue(all(asset["tiff_url"].startswith("https://data.source.coop/") for asset in plan.assets))
         self.assertTrue(plan.demo_boundary)
         self.assertEqual(plan.year, 2024)
+
+    def test_plain_feature_collection_becomes_a_hashed_demo_boundary_descriptor(self):
+        path = self.root / "boundary.geojson"
+        path.write_text(json.dumps({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},
+            "geometry":{"type":"Polygon","coordinates":[[[116,39],[117,39],[117,40],[116,40],[116,39]]]}}]}))
+        descriptor = load_boundary_descriptor(path)
+        self.assertEqual(descriptor["status"], "unconfirmed_osm_demo_boundary")
+        self.assertEqual(descriptor["bbox"], [116.0,39.0,117.0,40.0])
+        self.assertEqual(len(descriptor["sha256"]), 64)
+
+    def test_remote_vrt_is_rewritten_to_anonymous_https_range_source(self):
+        source = '<VRTDataset><GDALWarpOptions><SourceDataset relativeToVRT="0">/vsis3/us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2024/50N/tile.tiff</SourceDataset></GDALWarpOptions></VRTDataset>'
+        output = self.root / "local.vrt"
+        rewrite_remote_vrt(source, "https://data.source.coop/tge-labs/aef/v1/annual/2024/50N/tile.tiff", output)
+        rewritten = output.read_text()
+        self.assertIn("/vsicurl/https://data.source.coop/", rewritten)
+        self.assertNotIn("/vsis3/", rewritten)
+
+    def test_remote_vrt_request_identifies_the_demo_client(self):
+        captured = {}
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self): return b"<VRTDataset/>"
+        def opener(request, timeout):
+            captured["agent"] = request.get_header("User-agent"); captured["timeout"] = timeout
+            return Response()
+        text = download_remote_vrt("https://data.source.coop/tge-labs/aef/v1/annual/2024/50N/tile.vrt", opener=opener)
+        self.assertEqual(text, "<VRTDataset/>")
+        self.assertIn("haidian-gep", captured["agent"])
+        self.assertEqual(captured["timeout"], 60)
 
     def test_build_uses_vrt_sources_deduplicates_overlap_and_preserves_nodata(self):
         west = self.root / "west.tif"; east = self.root / "east.tif"
@@ -125,6 +162,18 @@ class SmartDataAefPipelineTests(unittest.TestCase):
         self.assertEqual(result.coverage_fraction, 15 / 16)
         with rasterio.open(result.output_path) as dataset:
             self.assertEqual(dataset.read(1)[0, 0], -128)
+
+    def test_bottom_up_raw_window_is_flipped_to_north_up_before_merge(self):
+        raw = self.root / "bottom-up.tif"
+        write_tile(raw, west=0, north=40, value=1, bottom_up=True)
+        plan = AefSubsetPlan(year=2024, boundary=projected_boundary(west=0,east=40),
+            assets=({"asset_id":"raw","vrt_url":"unused","tiff_url":str(raw),"bottom_up_raw":True},),
+            output_name="flipped.tif",demo_boundary=True)
+        result = build_aef_subset(plan,self.root/"output")
+        with rasterio.open(result.output_path) as dataset:
+            self.assertLess(dataset.transform.e,0)
+            self.assertEqual(dataset.read(1)[0,0],4)
+            self.assertEqual(dataset.read(1)[-1,0],1)
 
     def test_partial_coverage_is_retained_but_not_demo_ready(self):
         west = self.root / "west.tif"
@@ -261,6 +310,14 @@ class SmartDataAefClassifierTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "aligned to the AEF grid"):
             train_aef_classifier(aef, misaligned, FIXTURES / "boundary_demo.geojson", self.root / "model")
+
+    def test_classifier_accepts_plain_demo_feature_collection_boundary(self):
+        aef, labels = self.write_training_fixture()
+        boundary = self.root / "plain.geojson"
+        boundary.write_text(json.dumps({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},
+            "geometry":{"type":"Polygon","coordinates":[[[0,0],[120,0],[120,120],[0,120],[0,0]]]}}]}))
+        result = train_aef_classifier(aef, labels, boundary, self.root / "plain-model")
+        self.assertGreaterEqual(result.macro_f1, .70)
 
     def test_classifier_trains_classifies_and_emits_area_observations(self):
         aef, labels = self.write_training_fixture()

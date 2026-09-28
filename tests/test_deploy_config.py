@@ -3,6 +3,22 @@ from pathlib import Path
 
 
 class DeploymentConfigTests(unittest.TestCase):
+    def test_smart_data_flag_is_on_for_api_and_worker_but_spatial_stack_stays_out_of_runtime(self):
+        root = Path(__file__).parents[1]
+        compose = (root / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
+        dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+        api = compose.split("  task-api:", 1)[1].split("  task-worker:", 1)[0]
+        worker = compose.split("  task-worker:", 1)[1].split("  task-web:", 1)[0]
+        self.assertIn("GEP_SMART_DATA_ENABLED: ${GEP_SMART_DATA_ENABLED:-1}", api)
+        self.assertIn("GEP_SMART_DATA_ENABLED: ${GEP_SMART_DATA_ENABLED:-1}", worker)
+        self.assertNotIn("requirements-spatial", dockerfile)
+        self.assertNotIn("scikit-learn", dockerfile)
+
+    def test_deployment_readme_documents_smart_data_rollback(self):
+        readme = (Path(__file__).parents[1] / "deploy" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("smart-data-2024-v1", readme)
+        self.assertIn("上一 release", readme)
+        self.assertIn("GEP_SMART_DATA_ENABLED=0", readme)
     def test_web_uses_approved_loopback_port_and_api_has_no_host_port(self):
         compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
         api_section, web_section = compose.split("  task-web:", 1)

@@ -54,11 +54,15 @@ def main():
                 worker.run_forever(args.poll_seconds)
                 return
         elif args.command == 'smart-data-scan':
+            from .smart_data.observations import load_observation_manifest
             store = GepStore(args.database)
             try:
                 assets = scan_known_assets(Path(args.data_root), args.data_version)
                 registered = [store.smart_data.register_asset(asset) for asset in assets]
-                result = {'registered_count': len(registered), 'asset_ids': [item['asset_id'] for item in registered]}
+                manifest = Path(args.data_root) / 'catalog' / 'smart_data_observations_2024.json'
+                observations = [store.smart_data.register_observation(item) for item in load_observation_manifest(manifest)] if manifest.is_file() else []
+                result = {'registered_count': len(registered), 'asset_ids': [item['asset_id'] for item in registered],
+                          'observation_count': len(observations)}
             finally:
                 store.close()
         elif args.command == 'smart-data-build':

@@ -4,6 +4,7 @@ services:
     command: ["serve", "--host", "0.0.0.0", "--port", "8000", "--database", "/var/lib/haidian-gep/tasks.sqlite3"]
     environment:
       GEP_DATA_ROOT: /var/lib/haidian-gep-data
+      GEP_SMART_DATA_ENABLED: ${GEP_SMART_DATA_ENABLED:-1}
       GEP_TRUSTED_PROXY_USER_HEADER: HTTP_X_GEP_ACTOR
     volumes:
       - ${GEP_RUNTIME_DIR:?Set GEP_RUNTIME_DIR to the persistent runtime directory}:/var/lib/haidian-gep
@@ -21,6 +22,7 @@ services:
     command: ["worker", "--database", "/var/lib/haidian-gep/tasks.sqlite3"]
     environment:
       GEP_DATA_ROOT: /var/lib/haidian-gep-data
+      GEP_SMART_DATA_ENABLED: ${GEP_SMART_DATA_ENABLED:-1}
       # Provider credentials are injected only into this worker from a host-restricted environment.
       SUPPLEMENT_PROVIDER: ${SUPPLEMENT_PROVIDER:-none}
       DEEPSEEK_API_BASE_URL: ${DEEPSEEK_API_BASE_URL:-https://api.deepseek.com}

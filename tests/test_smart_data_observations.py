@@ -20,6 +20,7 @@ from gep.smart_data.observations import (
     build_modis_observations,
     build_nasa_power_observations,
     build_terrain_observations,
+    load_observation_manifest,
 )
 
 
@@ -151,6 +152,10 @@ class SmartDataObservationBuilderTests(unittest.TestCase):
         self.assertIn("precipitation", {item["metric"] for item in observations})
         self.assertIn("actual_et", {item["metric"] for item in observations})
         self.assertIn("slope_mean", {item["metric"] for item in observations})
+
+        loaded = load_observation_manifest(output)
+        self.assertEqual(len(loaded), 10)
+        self.assertEqual(loaded[0].year, 2024)
 
 
 if __name__ == "__main__":

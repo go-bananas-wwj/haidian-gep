@@ -175,6 +175,31 @@ def _aef_index_assets(root: Path, version: str) -> list[AssetRecord]:
     return result
 
 
+def _aef_product_assets(root: Path, version: str) -> list[AssetRecord]:
+    result = []
+    for manifest in sorted(root.glob("**/aef_2024_haidian_int8.manifest.json")):
+        data = _read_json(manifest)
+        output = manifest.parent / str(data.get("output_file", "aef_2024_haidian_int8.tif")) if isinstance(data, dict) else manifest.parent / "missing"
+        if isinstance(data, dict):
+            result.append(AssetRecord.from_dict({"asset_id":"alphaearth-2024-subset","asset_version":version,"asset_type":"aef_embedding",
+                "title":"2024 AlphaEarth Haidian subset","publisher":"Google and Google DeepMind",
+                "source_url":"https://data.source.coop/tge-labs/aef/v1/annual/2024/","license_or_access":"CC-BY 4.0",
+                "period_start":"2024-01-01","period_end":"2024-12-31","region_code":"110108","bbox":None,
+                "crs":data.get("crs"),"local_path":output.relative_to(root).as_posix(),"sha256":data.get("output_sha256"),
+                "quality_status":data.get("quality_status","review_required"),"quality":{**data,"data_version":version}}))
+    for report in sorted(root.glob("**/aef_ecosystem_class_2024.report.json")):
+        data = _read_json(report); output = report.parent / "aef_ecosystem_class_2024.tif"
+        if isinstance(data, dict):
+            result.append(AssetRecord.from_dict({"asset_id":"alphaearth-2024-classification","asset_version":version,"asset_type":"land_cover_model",
+                "title":"2024 AlphaEarth ecosystem classification","publisher":"Haidian GEP Demo",
+                "source_url":None,"license_or_access":"derived from AEF CC-BY 4.0 and ESA WorldCover",
+                "period_start":"2024-01-01","period_end":"2024-12-31","region_code":"110108","bbox":None,
+                "crs":"EPSG:32650","local_path":output.relative_to(root).as_posix(),"sha256":data.get("output_sha256"),
+                "quality_status":"available" if data.get("auto_usable") else "review_required",
+                "quality":{**data,"data_version":version}}))
+    return result
+
+
 def _xuannv_assets(root: Path, version: str) -> list[AssetRecord]:
     manifest = root / "catalog" / "xuannv_window_202512_202605.json"
     data = _read_json(manifest)
@@ -221,6 +246,7 @@ def scan_known_assets(data_root: Path, data_version: str = "smart-data-2024-v1")
     assets = [
         *_climate_assets(root, data_version), *_modis_assets(root, data_version),
         *_public_raster_assets(root, data_version), *_aef_index_assets(root, data_version),
+        *_aef_product_assets(root, data_version),
         *_xuannv_assets(root, data_version), *_official_fact_assets(root, data_version),
     ]
     by_id: dict[str, AssetRecord] = {}

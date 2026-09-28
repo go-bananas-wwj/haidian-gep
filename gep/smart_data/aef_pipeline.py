@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import tempfile
 from typing import Any, Mapping
+from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
 
 from gep.geo.alphaearth import select_2024_assets, validate_boundary
 
@@ -16,6 +18,45 @@ from gep.geo.alphaearth import select_2024_assets, validate_boundary
 AEF_HTTPS_PREFIX = "https://data.source.coop/tge-labs/aef/v1/annual/2024/"
 AEF_S3_PREFIX = "s3://us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2024/"
 AEF_ATTRIBUTION = "The AlphaEarth Foundations Satellite Embedding dataset is produced by Google and Google DeepMind."
+
+
+def load_boundary_descriptor(path: Path) -> dict[str, Any]:
+    """Load either a reviewed descriptor or a plain GeoJSON FeatureCollection as Demo-only."""
+    path = Path(path); document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("status"):
+        return document
+    if document.get("type") != "FeatureCollection" or len(document.get("features", [])) != 1:
+        raise ValueError("Demo boundary must contain exactly one feature")
+    geometry = document["features"][0].get("geometry")
+    if not isinstance(geometry, dict): raise ValueError("Demo boundary feature has no geometry")
+    points = []
+    def collect(value: Any) -> None:
+        if isinstance(value, list) and len(value) >= 2 and all(isinstance(item, (int, float)) for item in value[:2]):
+            points.append((float(value[0]), float(value[1])))
+        elif isinstance(value, list):
+            for item in value: collect(item)
+    collect(geometry.get("coordinates"))
+    if not points: raise ValueError("Demo boundary geometry has no coordinates")
+    return {"status":"unconfirmed_osm_demo_boundary", "sha256":_sha256(path), "crs":"EPSG:4326",
+            "bbox":[min(x for x,_ in points),min(y for _,y in points),max(x for x,_ in points),max(y for _,y in points)],
+            "geometry":geometry}
+
+
+def rewrite_remote_vrt(vrt_text: str, tiff_url: str, destination: Path) -> Path:
+    if not tiff_url.startswith(AEF_HTTPS_PREFIX) or not tiff_url.endswith((".tif", ".tiff")):
+        raise ValueError("AEF TIFF is outside the approved Source Cooperative 2024 prefix")
+    root = ET.fromstring(vrt_text); sources = root.findall(".//SourceDataset")
+    if len(sources) != 1: raise ValueError("AEF VRT must contain exactly one SourceDataset")
+    sources[0].text = f"/vsicurl/{tiff_url}"; sources[0].set("relativeToVRT", "0")
+    destination = Path(destination); destination.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(root).write(destination, encoding="UTF-8", xml_declaration=True)
+    return destination
+
+
+def download_remote_vrt(url: str, opener: Any = urlopen) -> str:
+    request = Request(url, headers={"User-Agent":"haidian-gep-smart-data/1.0"})
+    with opener(request, timeout=60) as response:
+        return response.read().decode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -108,7 +149,7 @@ def plan_aef_subset(index_path: Path, boundary: Mapping[str, Any], year: int = 2
     for number, record in enumerate(selected):
         tiff_url, vrt_url = _urls(record)
         assets.append({**record, "asset_id": str(record.get("asset_id") or f"aef-2024-{number:03d}"),
-                       "tiff_url": tiff_url, "vrt_url": vrt_url})
+                       "tiff_url": tiff_url, "vrt_url": vrt_url, "bottom_up_raw": True})
     return AefSubsetPlan(
         year=year, boundary=checked, assets=tuple(assets), output_name="aef_2024_haidian_int8.tif", demo_boundary=demo,
     )
@@ -173,10 +214,40 @@ def build_aef_subset(plan: AefSubsetPlan, output_dir: Path) -> AefSubsetResult:
     except ImportError as error:
         raise RuntimeError("numpy and rasterio are required to build the AEF subset") from error
 
-    sources = []
+    sources = []; source_workspace = tempfile.TemporaryDirectory(prefix="aef-sources-", dir=output_dir)
+    raster_env = rasterio.Env(AWS_NO_SIGN_REQUEST="YES", AWS_REGION="us-west-2")
+    raster_env.__enter__()
     try:
-        for asset in plan.assets:
-            dataset = rasterio.open(_safe_source(str(asset["vrt_url"])))
+        for number, asset in enumerate(plan.assets):
+            vrt_source = str(asset["vrt_url"])
+            if asset.get("bottom_up_raw"):
+                tiff_url = str(asset["tiff_url"])
+                if tiff_url.startswith(AEF_HTTPS_PREFIX):
+                    raw_path = "/vsis3/us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2024/" + tiff_url.removeprefix(AEF_HTTPS_PREFIX)
+                elif Path(tiff_url).is_file(): raw_path = tiff_url
+                else: raise ValueError("remote AEF TIFF is outside approved prefix")
+                clipped_path = Path(source_workspace.name) / f"clipped-{number}.tif"
+                with rasterio.open(raw_path) as raw:
+                    raw_geometry = transform_geom(plan.boundary["crs"], raw.crs, plan.boundary["geometry"], precision=7)
+                    left,bottom,right,top = geometry_bounds(raw_geometry)
+                    xres,yres = abs(raw.transform.a),abs(raw.transform.e)
+                    col0=max(0,int(math.floor((left-raw.transform.c)/xres))); col1=min(raw.width,int(math.ceil((right-raw.transform.c)/xres)))
+                    if raw.transform.e > 0:
+                        row0=max(0,int(math.floor((bottom-raw.transform.f)/yres))); row1=min(raw.height,int(math.ceil((top-raw.transform.f)/yres)))
+                    else:
+                        row0=max(0,int(math.floor((raw.transform.f-top)/yres))); row1=min(raw.height,int(math.ceil((raw.transform.f-bottom)/yres)))
+                    if col0>=col1 or row0>=row1: continue
+                    window=rasterio.windows.Window(col0,row0,col1-col0,row1-row0); data=raw.read(window=window)
+                    if raw.transform.e > 0: data=data[:,::-1,:]; north=raw.transform.f+row1*yres
+                    else: north=raw.transform.f-row0*yres
+                    clipped_transform=rasterio.transform.from_origin(raw.transform.c+col0*xres,north,xres,yres)
+                    with rasterio.open(clipped_path,"w",driver="GTiff",width=data.shape[2],height=data.shape[1],count=raw.count,
+                        dtype=raw.dtypes[0],crs=raw.crs,transform=clipped_transform,nodata=raw.nodata,compress="DEFLATE") as clipped:
+                        clipped.write(data)
+                        for band,description in enumerate(raw.descriptions,1): clipped.set_band_description(band,description)
+                dataset=rasterio.open(clipped_path)
+            else:
+                dataset = rasterio.open(_safe_source(vrt_source))
             sources.append(dataset)
             if dataset.count != 64 or any(dtype != "int8" for dtype in dataset.dtypes):
                 raise ValueError("AEF source must expose 64 signed Int8 bands")
@@ -236,3 +307,5 @@ def build_aef_subset(plan: AefSubsetPlan, output_dir: Path) -> AefSubsetResult:
     finally:
         for source in sources:
             source.close()
+        raster_env.__exit__(None, None, None)
+        source_workspace.cleanup()

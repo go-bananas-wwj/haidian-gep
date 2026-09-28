@@ -71,3 +71,9 @@ curl --fail http://127.0.0.1:9088/api/health
 ## 恢复
 
 停止服务：`docker compose -f compose.demo.yml down`。恢复时先还原 `$GEP_RUNTIME_DIR` 备份，再验证证据哈希、健康接口和同一 SQLite 数据库中的任务/审核/事件记录。
+
+### 智能数据版本回退
+
+`smart-data-2024-v1` 启用数据资产后台、模型估算和智能试算；大型 AEF、MODIS、DEM、WorldCover 产物仍位于只读 `$GEP_DATA_DIR`，不会写入镜像。API 与 worker 必须同时设置 `GEP_SMART_DATA_ENABLED=1`，Web 和 API 不接收模型密钥。
+
+若智能数据流程异常，先设置 `GEP_SMART_DATA_ENABLED=0` 并重建容器，恢复旧研究流程；若数据库、页面或运行恢复仍不通过，则切换到上一 release 的 Compose 文件并还原该 release 对应的运行时备份。关闭功能开关不会删除智能数据表、资产或计算链。

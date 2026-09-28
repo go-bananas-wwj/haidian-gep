@@ -82,6 +82,24 @@ class SmartDataAssetScanTests(unittest.TestCase):
         self.assertEqual(assets[0].period_end, "2026-05-31")
         self.assertEqual(assets[0].quality_status, "review_required")
 
+    def test_scan_exposes_built_aef_subset_and_downgraded_classification(self):
+        subset = self.root / "haidian_gep_2024" / "03_features" / "alphaearth_2024"
+        classified = self.root / "haidian_gep_2024" / "03_features" / "aef_classification_2024" / "classification"
+        subset.mkdir(parents=True); classified.mkdir(parents=True)
+        (subset / "aef_2024_haidian_int8.tif").write_bytes(b"subset")
+        (subset / "aef_2024_haidian_int8.manifest.json").write_text(json.dumps({
+            "year":2024,"output_file":"aef_2024_haidian_int8.tif","output_sha256":"e"*64,
+            "quality_status":"demo_ready","coverage_fraction":1.0,"band_count":64,"pixel_size_m":10.0,"crs":"EPSG:32650",
+        }))
+        (classified / "aef_ecosystem_class_2024.tif").write_bytes(b"classified")
+        (classified / "aef_ecosystem_class_2024.report.json").write_text(json.dumps({
+            "output_sha256":"f"*64,"macro_f1":0.43,"auto_usable":False,"gate_reasons":["macro_f1_below_0.70"]
+        }))
+        assets = scan_known_assets(self.root)
+        by_id={a.asset_id:a for a in assets}
+        self.assertEqual(by_id["alphaearth-2024-subset"].quality_status,"demo_ready")
+        self.assertEqual(by_id["alphaearth-2024-classification"].quality_status,"review_required")
+
 
 if __name__ == "__main__":
     unittest.main()

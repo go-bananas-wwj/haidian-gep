@@ -3,11 +3,18 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import math
 from pathlib import Path
 from typing import Iterable
 
 from .types import ObservationRecord
+
+
+def load_observation_manifest(path: Path) -> list[ObservationRecord]:
+    loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(loaded, list): raise ValueError("observation manifest must be a list")
+    return [ObservationRecord.from_dict(item) for item in loaded]
 
 
 def _sha256(path: Path) -> str:

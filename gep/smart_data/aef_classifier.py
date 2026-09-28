@@ -12,6 +12,7 @@ import tempfile
 from typing import Any, Iterable
 
 from .types import ObservationRecord
+from .aef_pipeline import load_boundary_descriptor
 
 
 CLASS_NAMES = {
@@ -179,7 +180,7 @@ def train_aef_classifier(
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.metrics import f1_score, recall_score
 
-    boundary = json.loads(Path(boundary_path).read_text(encoding="utf-8"))
+    boundary = load_boundary_descriptor(Path(boundary_path))
     if boundary.get("status") not in {"approved", "unconfirmed_osm_demo_boundary"}:
         raise ValueError("classifier boundary status is not allowed")
     with rasterio.open(aef_path) as aef, rasterio.open(labels_path) as labels:

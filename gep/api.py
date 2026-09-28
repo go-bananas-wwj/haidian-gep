@@ -13,6 +13,7 @@ from .dify import DifyWorkflow
 from .methods import method_cards
 from .smart_data import SmartDataConflictError
 from .smart_data.assets import scan_known_assets
+from .smart_data.observations import load_observation_manifest
 from .task_service import ConflictError, GepStore, SnapshotBlocked
 
 
@@ -121,7 +122,9 @@ class DemoApi:
                     raise ValueError("GEP data root is not configured")
                 assets = scan_known_assets(self.data_root)
                 registered = [self.store.smart_data.register_asset(asset) for asset in assets]
-                return self._response(start_response, 201, {"registered_count": len(registered), "asset_ids": [item["asset_id"] for item in registered]})
+                manifest = self.data_root / "catalog" / "smart_data_observations_2024.json"
+                observations = [self.store.smart_data.register_observation(item) for item in load_observation_manifest(manifest)] if manifest.is_file() else []
+                return self._response(start_response, 201, {"registered_count": len(registered), "asset_ids": [item["asset_id"] for item in registered], "observation_count":len(observations)})
             if method == "GET" and parts == ["derived-observations"]:
                 query = parse_qs(environ.get("QUERY_STRING", ""))
                 if not query.get("metric") or not query.get("year") or not query.get("region_code"):
