@@ -1,0 +1,10 @@
+{
+  "status": "unconfirmed_osm_demo_boundary",
+  "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "crs": "EPSG:4326",
+  "bbox": [116.0, 39.8, 116.4, 40.2],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[116.0, 39.8], [116.4, 39.8], [116.4, 40.2], [116.0, 40.2], [116.0, 39.8]]]
+  }
+}

@@ -34,6 +34,13 @@ def main():
     s.add_argument('--database', required=True)
     s.add_argument('--data-root', required=True)
     s.add_argument('--data-version', default='smart-data-2024-v1')
+    s = sub.add_parser('smart-data-build', help='build large smart-data artifacts with optional spatial dependencies')
+    s.add_argument('stage', choices=('aef',))
+    s.add_argument('--data-root', required=True)
+    s.add_argument('--boundary', required=True)
+    s.add_argument('--year', type=int, default=2024)
+    s.add_argument('--index')
+    s.add_argument('--output-dir')
     args = p.parse_args()
     try:
         if args.command == 'serve':
@@ -54,6 +61,15 @@ def main():
                 result = {'registered_count': len(registered), 'asset_ids': [item['asset_id'] for item in registered]}
             finally:
                 store.close()
+        elif args.command == 'smart-data-build':
+            from .smart_data.aef_pipeline import build_aef_subset, plan_aef_subset
+            root = Path(args.data_root)
+            boundary = json.loads(Path(args.boundary).read_text(encoding='utf-8'))
+            indexes = [Path(args.index)] if args.index else sorted(root.glob('**/aef_index.parquet'))
+            if len(indexes) != 1:
+                raise ValueError('exactly one AEF index is required')
+            output = Path(args.output_dir) if args.output_dir else root / '03_features' / 'alphaearth_2024'
+            result = build_aef_subset(plan_aef_subset(indexes[0], boundary, args.year), output)
         elif args.command == 'check': result = catalog.check(args.csv)
         elif args.command == 'build':
             result = catalog.build(args.csv); workflow.save(result, args.out)

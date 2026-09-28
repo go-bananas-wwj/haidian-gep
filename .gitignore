@@ -6,6 +6,10 @@ dist/
 .env
 .env.*
 data/
+*.tif
+*.tiff
+*.vrt
+*.joblib
 runs/
 releases/
 *.log

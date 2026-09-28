@@ -1,0 +1,6 @@
+[
+  {"asset_id":"west","year":2024,"path":"s3://us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2024/50N/west.tiff","crs":"EPSG:32650","wgs84_west":115.9,"wgs84_south":39.7,"wgs84_east":116.2,"wgs84_north":40.1},
+  {"asset_id":"east","year":2024,"path":"s3://us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2024/50N/east.tiff","crs":"EPSG:32650","wgs84_west":116.1,"wgs84_south":39.9,"wgs84_east":116.5,"wgs84_north":40.3},
+  {"asset_id":"middle","year":2024,"path":"s3://us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2024/50N/middle.tiff","crs":"EPSG:32650","wgs84_west":116.0,"wgs84_south":39.8,"wgs84_east":116.4,"wgs84_north":40.2},
+  {"asset_id":"old","year":2023,"path":"s3://us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2023/50N/old.tiff","crs":"EPSG:32650","wgs84_west":116.0,"wgs84_south":39.8,"wgs84_east":116.4,"wgs84_north":40.2}
+]
