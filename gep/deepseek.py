@@ -49,16 +49,19 @@ class DeepSeekWorkflow:
         )
 
     def run(self, work_order: dict[str, Any]) -> dict[str, Any]:
+        return self.complete_json(SYSTEM_PROMPT, work_order)
+
+    def complete_json(self, system_prompt: str, payload_data: Mapping[str, Any]) -> dict[str, Any]:
         payload = {
             "model": self.model,
             "messages": [
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT,
+                    "content": system_prompt,
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(work_order, ensure_ascii=False, sort_keys=True, allow_nan=False),
+                    "content": json.dumps(payload_data, ensure_ascii=False, sort_keys=True, allow_nan=False),
                 },
             ],
             "response_format": {"type": "json_object"},
