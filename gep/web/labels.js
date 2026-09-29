@@ -57,3 +57,13 @@ export function statusLabel(status) {
   const key = String(status || "");
   return STATUS_LABELS[key] || key || "状态待确认";
 }
+
+export function formatNumber(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return String(value ?? "");
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 4 }).format(value);
+}
+
+export function formatUnit(unit) {
+  const value = String(unit || "");
+  return ({ hm2:"hm²", m2:"m²", km2:"km²", "tCO2/a":"tCO₂/a", "kgC/m2/a":"kgC/m²/a" })[value] || value;
+}

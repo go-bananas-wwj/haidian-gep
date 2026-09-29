@@ -41,6 +41,10 @@ def main():
     s.add_argument('--year', type=int, default=2024)
     s.add_argument('--index')
     s.add_argument('--output-dir')
+    s = sub.add_parser('index-knowledge', help='index approved project documents into the agent knowledge base')
+    s.add_argument('--database', required=True)
+    s.add_argument('--data-root', required=True)
+    s.add_argument('--pdf', action='append', default=[])
     args = p.parse_args()
     try:
         if args.command == 'serve':
@@ -74,6 +78,9 @@ def main():
                 raise ValueError('exactly one AEF index is required')
             output = Path(args.output_dir) if args.output_dir else root / '03_features' / 'alphaearth_2024'
             result = build_aef_subset(plan_aef_subset(indexes[0], boundary, args.year), output)
+        elif args.command == 'index-knowledge':
+            from .agent.knowledge import index_knowledge
+            result = index_knowledge(args.database, args.data_root, pdf_paths=args.pdf)
         elif args.command == 'check': result = catalog.check(args.csv)
         elif args.command == 'build':
             result = catalog.build(args.csv); workflow.save(result, args.out)

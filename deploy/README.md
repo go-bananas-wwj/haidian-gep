@@ -1,6 +1,6 @@
 # 部署前置与运行说明
 
-此目录只提供海淀 GEP 任务服务的容器编排；未包含 Dify 镜像、模型密钥、原始数据或教学数值。
+此目录提供海淀 GEP 任务服务与原生智能体的容器编排；不需要 Dify 镜像，也不包含模型密钥、原始数据或教学数值。
 
 ## 主机准入
 
@@ -22,20 +22,30 @@ API 不绑定宿主机端口，仅位于 Compose 内部网络；画布为 `127.0
 
 编排文件会先等待 API 的 `/health` 成功，再启动 Web 代理。单服务重建期间可短暂返回 `502`；探测与发布脚本应采用带重试的健康检查，而不是把该启动窗口误判为故障。
 
-## 智能体补充提供方
+## 原生智能体与工具配置
 
-当前 Demo 使用 DeepSeek 直连适配器进行真实联调，Dify 继续作为可选编排适配器保留。只有 `task-worker` 接收模型配置；API 和 Web 容器不需要、也不会取得模型密钥。两种提供方都只返回带证据的候选或人工介入结论，不能审核节点或执行正式 GEP 计算。
+当前 Demo 使用项目自有 `AgentKernel`，在 `task-worker` 内编排本地数据、SQLite FTS5 知识库、安全 Web 搜索/原文读取、AlphaEarth 和登记 GEP 公式。DeepSeek 直连适配器只负责生成结构化工具计划和不含自造数字的中文说明；Dify 继续作为关闭原生智能体后的可选兼容适配器。只有 `task-worker` 接收模型与搜索配置，API 和 Web 容器不取得密钥。
 
 在宿主机运行目录创建权限为 `0600` 的环境文件，例如 `/data/wwj/haidian-gep/runtime/deepseek.env`。通过不回显的交互输入写入 `DEEPSEEK_API_KEY`，并设置：
 
 ```text
 SUPPLEMENT_PROVIDER=deepseek
+GEP_AGENT_ENABLED=1
+GEP_SEARCH_PROVIDER=duckduckgo
 DEEPSEEK_API_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-flash
 DEEPSEEK_TIMEOUT_SECONDS=30
 ```
 
-密钥不得出现在 shell 历史、Compose 文件、Git、镜像层、SQLite、事件、静态资源、截图或导出包中。启动前只核验变量是否存在和文件权限，不打印变量值；部署后以仅报告文件名/计数的扫描方式检查容器配置、应用日志、运行数据库和静态资源。DeepSeek 只生成说明，不能决定数值、来源和风险等级。A 候选限于本地精确准入事实或完成验证的确定性/AEF结果；政府官方代理变量进入 B；工具全部执行后仍无数值时进入“已自动检索·等待数据”，而不是泛化为人工介入。
+密钥不得出现在 shell 历史、Compose 文件、Git、镜像层、SQLite、事件、静态资源、截图或导出包中。启动前只核验变量是否存在和文件权限，不打印变量值；部署后以仅报告文件名/计数的扫描方式检查容器配置、应用日志、运行数据库和静态资源。DeepSeek 不能决定数值、来源和风险等级。A 限于完全匹配的准入事实；B 为官方公开值或确定性公开数据计算；C 为代理、论文参数或模型估算，只进入智能试算；D 为冲突、授权或业务口径，归并成人工工作包。
+
+如部署内部 SearXNG，设置 `GEP_SEARCH_PROVIDER=searxng` 与 `GEP_SEARXNG_URL`；否则使用 DuckDuckGo 发现适配器。搜索结果必须继续经过 `web.read`/`document.read`，不能直接作为证据。启动服务前可重建知识索引：
+
+```bash
+python -m gep index-knowledge \
+  --database /data/wwj/haidian-gep/runtime/tasks.sqlite3 \
+  --data-root /data/wwj/haidian-gep/data
+```
 
 ## 官方来源、AEF 与批量审核
 
@@ -77,3 +87,7 @@ curl --fail http://127.0.0.1:9088/api/health
 `smart-data-2024-v1` 启用数据资产后台、模型估算和智能试算；大型 AEF、MODIS、DEM、WorldCover 产物仍位于只读 `$GEP_DATA_DIR`，不会写入镜像。API 与 worker 必须同时设置 `GEP_SMART_DATA_ENABLED=1`，Web 和 API 不接收模型密钥。
 
 若智能数据流程异常，先设置 `GEP_SMART_DATA_ENABLED=0` 并重建容器，恢复旧研究流程；若数据库、页面或运行恢复仍不通过，则切换到上一 release 的 Compose 文件并还原该 release 对应的运行时备份。关闭功能开关不会删除智能数据表、资产或计算链。
+
+### 原生智能体回退
+
+若 Web 搜索、知识检索或 Agent 规划出现异常，先设置 `GEP_AGENT_ENABLED=0` 并重建 `task-worker`，恢复现有 `SmartDataWorkflow + ResearchWorkflow`；该操作不删除 `agent_runs`、`tool_runs`、`evidence_items`、`calculation_steps`、`agent_decisions` 或知识表。若旧流程也不能恢复，再切回上一 release 并还原对应运行时备份。

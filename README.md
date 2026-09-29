@@ -11,11 +11,28 @@ python -m gep serve --database ./runtime/tasks.sqlite3
 # 浏览 http://127.0.0.1:8000/
 ```
 
-接口包括创建任务、读取图与事件、查看节点证据、审核、修正、幂等补充请求和冻结快照。Dify 未配置时，补充工作单只会以 `blocked` 状态保存，不会创建模拟结果。容器部署和恢复约束见 [deploy/README.md](deploy/README.md)。
+接口包括创建任务、读取图与事件、查看节点证据、审核、修正、幂等补充请求和冻结快照。原生智能体在 Worker 内调用本地数据、项目知识库、安全 Web 搜索/原文读取、AlphaEarth 和登记核算方法；Dify 仅保留为关闭原生智能体后的可选兼容适配器。容器部署和恢复约束见 [deploy/README.md](deploy/README.md)。
+
+## 原生 GEP 智能体
+
+设置 `GEP_AGENT_ENABLED=1` 后，补充 Worker 使用项目自有的 `AgentKernel`，无需部署 Dify。DeepSeek 只生成结构化工具计划和中文说明；数值、单位转换、空间处理与公式执行均由登记工具完成，所有工具运行、证据、计算步骤和自动决策写入 SQLite 台账。关闭 `GEP_AGENT_ENABLED` 可立即回退到原有 `ResearchWorkflow`。
+
+默认 Web 搜索使用无新增密钥的 DuckDuckGo HTML 发现适配器；内部部署可设置 `GEP_SEARCH_PROVIDER=searxng` 和 `GEP_SEARXNG_URL=https://...`。搜索摘要仅作为线索，必须经安全原文读取后才能成为证据。读取器拒绝本机、私网、链路本地、云元数据、越界重定向、超大响应和未允许内容类型。
+
+项目知识库使用 SQLite FTS5，并在当前 SQLite 中文分词不能命中短语时使用最多 5000 条记录的受控子串回退。只索引 `data_root/04_docs`、`data_root/catalog` 中的 Markdown、JSON、TXT，以及通过 `--pdf` 明确指定且位于数据根目录内的 PDF：
+
+```bash
+python -m gep index-knowledge \
+  --database ./runtime/tasks.sqlite3 \
+  --data-root "$GEP_DATA_ROOT" \
+  --pdf "$GEP_DATA_ROOT/04_docs/GBT-46869-2025.pdf"
+```
+
+右侧抽屉按“核算对象—目标—输入—方法—代入—结果—来源—执行记录—风险—审核”解释每个节点，字段采用“中文名称（程序字段）”格式。A 为完全匹配准入事实，B 为官方/公开确定性计算，C 为论文参数、代理或模型估算智能试算，D 为来源冲突、授权限制或业务口径人工工作包；只有 A 可以自动采用，B/C 均不越过正式审核闸门。
 
 ## 安装与检查
 
-Python 3.11+，已在3.12测试；基础功能使用标准库。
+Python 3.11+，已在 3.12 测试；大部分功能使用标准库，受控 PDF 提取依赖 `pypdf`，由项目安装自动提供。
 
 ```bash
 python3.12 -m venv .venv
@@ -75,7 +92,7 @@ unset MODELSCOPE_TOKEN
 
 ## 环境和文档
 
-- `pyproject.toml`：基础包，无第三方运行依赖。
+- `pyproject.toml`：基础包；运行时仅增加 `pypdf` 用于受控 PDF 文本提取。
 - `requirements-publish.txt`：发布SDK版本，环境快照见`docs/environment-publish.txt`。
 - `Dockerfile`：Python 3.12镜像构建配方；本次验证以本地venv为准，未宣称容器构建通过。
 - `docs/implementation.tex`：Overleaf详细方案副本，含获取步骤、国标方法、PRD和用户算例。

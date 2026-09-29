@@ -3,7 +3,7 @@ import { GepGraph, nodeState } from "./graph.js";
 import { renderMap } from "./map.js";
 import { nextActionFor } from "./guide.js";
 import { renderAssetCatalog, renderHumanWork } from "./smart-data.js";
-import { fieldLabel, formatField, statusLabel } from "./labels.js";
+import { fieldLabel, formatField, formatNumber, formatUnit, statusLabel } from "./labels.js";
 
 const $ = selector => document.querySelector(selector);
 const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, batchPreview:null, individualReviewMode:false, appendix:null, automation:null, demoReadiness:null, assets:[] };
@@ -188,13 +188,13 @@ function safeSourceLink(url) {
 }
 
 function renderAgentDetail(detail) {
-  const value = detail.value === null ? "尚无数值" : `${detail.value} ${detail.unit || ""}`.trim();
+  const value = detail.value === null ? "尚无数值" : `${formatNumber(detail.value)} ${formatUnit(detail.unit)}`.trim();
   $("#accounting-object").replaceChildren(); appendLessonRow($("#accounting-object"), formatField(detail.field), value, detail.node_key);
   $("#detail-objective").textContent = detail.objective;
 
   const inputs = $("#required-inputs"); inputs.replaceChildren();
   for (const input of detail.required_inputs || []) {
-    const inputValue = input.value === null ? "尚未取得" : `${input.value} ${input.unit || ""}`.trim();
+    const inputValue = input.value === null ? "尚未取得" : `${formatNumber(input.value)} ${formatUnit(input.unit)}`.trim();
     appendLessonRow(inputs, formatField(input.field), inputValue, `${statusLabel(input.status)} · ${statusLabel(input.review_status)}`);
   }
   if (!inputs.children.length) inputs.textContent = "该步骤没有需要展示的底层输入。";
@@ -209,7 +209,7 @@ function renderAgentDetail(detail) {
   for (const step of detail.steps || []) {
     const item = document.createElement("li");
     const parts = [step.title, step.formula, step.substitution].filter(Boolean);
-    const stepResult = step.result_value === undefined ? "" : `得到 ${step.result_value} ${step.unit || ""}`.trim();
+    const stepResult = step.result_value === undefined ? "" : `得到 ${formatNumber(step.result_value)} ${formatUnit(step.unit)}`.trim();
     item.textContent = `${parts.join("；")}${stepResult ? `；${stepResult}` : ""}` || `完成第 ${step.sequence || steps.children.length + 1} 步`;
     steps.append(item);
   }

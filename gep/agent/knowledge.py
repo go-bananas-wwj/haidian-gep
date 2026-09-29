@@ -7,6 +7,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from pypdf.errors import PyPdfError
 
 from .store import AgentStore, AgentStoreConflictError
 
@@ -188,3 +189,110 @@ class KnowledgeBase:
                 fallback_sql, [query, *parameters, self.fallback_scan_limit]
             ).fetchall()
         return [self._hit(row) for row in rows[:limit]]
+
+
+def _document_title(path: Path, text: str) -> str:
+    if path.suffix.lower() == ".md":
+        for line in text.splitlines():
+            if line.lstrip().startswith("#"):
+                title = line.lstrip("# ").strip()
+                if title:
+                    return title
+    return path.stem.replace("_", " ").replace("-", " ")
+
+
+def index_knowledge(
+    database_path: str | Path,
+    data_root: str | Path,
+    *,
+    pdf_paths: Sequence[str | Path] = (),
+) -> dict[str, Any]:
+    """Index only known documentation folders and explicitly selected PDFs."""
+    root = Path(data_root).resolve()
+    if not root.is_dir():
+        raise ValueError("data_root must be an existing directory")
+    allowed: list[Path] = []
+    for directory_name in ("04_docs", "catalog"):
+        directory = root / directory_name
+        if directory.is_dir():
+            allowed.extend(sorted(directory.glob("*.md")))
+            allowed.extend(sorted(directory.glob("*.json")))
+            allowed.extend(sorted(directory.glob("*.txt")))
+    explicit_pdfs = [Path(path).resolve() for path in pdf_paths]
+    for path in explicit_pdfs:
+        if not path.is_relative_to(root):
+            raise ValueError("explicit PDF must stay inside data_root")
+        allowed.append(path)
+
+    knowledge = KnowledgeBase(database_path)
+    indexed_count = 0
+    unchanged_count = 0
+    errors: list[dict[str, str]] = []
+    try:
+        for path in allowed:
+            try:
+                if path.is_symlink() or not path.is_file():
+                    raise ValueError("source must be a regular non-symlink file")
+                raw = path.read_bytes()
+                if len(raw) > 20 * 1024 * 1024:
+                    raise ValueError("source file exceeds the 20 MiB indexing limit")
+                relative = path.relative_to(root).as_posix()
+                suffix = path.suffix.lower()
+                if suffix in {".md", ".json", ".txt"}:
+                    text = raw.decode("utf-8")
+                    if suffix == ".json":
+                        payload = json.loads(text)
+                        text = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+                    chunks = (text,)
+                    title = _document_title(path, text)
+                    publisher = "海淀区 GEP 项目"
+                    locator = f"项目文件 {relative}"
+                elif suffix == ".pdf":
+                    from io import BytesIO
+                    from pypdf import PdfReader as PyPdfReader
+
+                    pdf = PyPdfReader(BytesIO(raw))
+                    chunks = tuple((page.extract_text() or "").strip() for page in pdf.pages)
+                    chunks = tuple(chunk for chunk in chunks if chunk)
+                    if not chunks:
+                        raise ValueError("PDF has no extractable text")
+                    metadata = pdf.metadata or {}
+                    title = str(metadata.get("/Title") or path.stem)
+                    publisher = str(metadata.get("/Author") or "发布者待核验")
+                    locator = f"PDF {relative}，共 {len(pdf.pages)} 页"
+                else:
+                    continue
+                content_hash = hashlib.sha256("\n".join(chunks).encode()).hexdigest()
+                identity = hashlib.sha256(f"{relative}:{content_hash}".encode()).hexdigest()[:24]
+                document_id = f"knowledge-{identity}"
+                existed = knowledge.connection.execute(
+                    "SELECT 1 FROM knowledge_documents WHERE document_id=?", (document_id,)
+                ).fetchone() is not None
+                knowledge.add_document({
+                    "document_id": document_id,
+                    "title": title,
+                    "publisher": publisher,
+                    "source_url": None,
+                    "license_or_access": "project-internal-review",
+                    "locator": locator,
+                    "region_code": "110108",
+                    "year_start": None,
+                    "year_end": None,
+                    "review_state": "unreviewed",
+                    "content": "\n".join(chunks),
+                    "source_path": relative,
+                }, chunks=chunks)
+                if existed:
+                    unchanged_count += 1
+                else:
+                    indexed_count += 1
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, EOFError, PyPdfError) as error:
+                errors.append({"path": str(path), "error": type(error).__name__})
+    finally:
+        knowledge.close()
+    return {
+        "indexed_count": indexed_count,
+        "unchanged_count": unchanged_count,
+        "error_count": len(errors),
+        "errors": errors,
+    }

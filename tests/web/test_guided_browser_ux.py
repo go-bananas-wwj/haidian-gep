@@ -120,6 +120,14 @@ class GuidedBrowserUxTests(unittest.TestCase):
             ["等待自动研究完成", "处理 2 个异常", "整批确认 7 项", "查看 8 个数据缺口", "进入核算方案"],
         )
 
+    def test_drawer_number_formatter_removes_floating_point_noise(self):
+        """Break caught: a calculated area could be displayed as 23044.149999999998."""
+        values = self.page.evaluate("""async () => {
+          const { formatNumber, formatUnit } = await import('/labels.js');
+          return [formatNumber(23044.149999999998), formatNumber(12.529166666666667), formatUnit('hm2')];
+        }""")
+        self.assertEqual(values, ["23,044.15", "12.5292", "hm²"])
+
     def test_restored_task_lays_out_flow_after_prepare_page_is_visible(self):
         """Break caught: first open renders all SVG paths at 0,0 while the prepare page is hidden."""
         page = self.browser.new_page()
