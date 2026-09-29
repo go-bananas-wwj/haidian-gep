@@ -7,7 +7,7 @@ name = "haidian-gep"
 version = "0.1.0"
 description = "Haidian 2024 GEP reference-data workbench and review example"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["pypdf>=5,<6"]
 
 [project.optional-dependencies]
 publish = ["modelscope-hub==0.4.3"]
