@@ -19,6 +19,7 @@ from .methods import method_cards
 from .runs import evaluate_frozen_graph
 from .smart_data import SmartDataStore
 from .smart_data.workflow import SmartDataWorkflow
+from .agent.store import AgentStore
 
 
 INDICATORS = (
@@ -35,6 +36,7 @@ INDICATORS = (
     ("C1", "旅游康养", "cultural"), ("C2", "休闲游憩", "cultural"),
     ("C3", "景观增值", "cultural"),
 )
+INDICATOR_LABELS = {indicator_id: label for indicator_id, label, _category in INDICATORS}
 METHOD_CARDS = {card.indicator_id: card for card in method_cards()}
 SUPPLEMENT_RECOVERY_SECONDS = 300
 
@@ -473,6 +475,130 @@ class GepStore:
                 "observations":[observation],"assets":assets,"run":{"calculation_run_id":current.get("tool_run_id",source_id),
                 "result":{"value":json.loads(node["value_json"]),"unit":node["unit"]},
                 "quality":{"evidence_classes":[observation["evidence_class"]],"uncertainty":observation["uncertainty"]}}}
+
+    def agent_detail(self, task_id: str, node_id: str) -> dict[str, Any]:
+        """Build one stable, teaching-oriented explanation for the right drawer."""
+        row = self._node_by_id(node_id)
+        if row["task_id"] != task_id:
+            raise KeyError("node not found in task")
+        node = self._node_dict(row)
+        audit = AgentStore(self.connection).latest_node_detail(task_id, node_id)
+        current = node.get("evidence", {}).get("current", node.get("evidence", {}))
+        indicator_id = node["node_key"] if node["kind"] == "indicator" else node.get("parent_key")
+        card = METHOD_CARDS.get(indicator_id)
+
+        if node["kind"] == "indicator":
+            inputs = [
+                self._node_dict(item) for item in self.connection.execute(
+                    "SELECT * FROM nodes WHERE task_id=? AND parent_key=? ORDER BY node_key",
+                    (task_id, node["node_key"]),
+                ).fetchall()
+            ]
+        else:
+            inputs = [node]
+        required_inputs = [{
+            "field": item["label"],
+            "node_key": item["node_key"],
+            "value": item["value"],
+            "unit": item["unit"],
+            "status": item["acquisition_status"],
+            "review_status": item["review_status"],
+        } for item in inputs]
+
+        calculation = None
+        try:
+            calculation = self.calculation_chain(node_id)
+        except KeyError:
+            pass
+        audit_steps = list(audit["calculation_steps"]) if audit else []
+        if audit_steps:
+            steps = audit_steps
+        elif calculation:
+            steps = [{
+                "sequence": index + 1,
+                "title": f"读取输入 {observation.get('metric', index + 1)}",
+                "value": observation.get("value"),
+                "unit": observation.get("unit"),
+                "source_id": observation.get("observation_id"),
+            } for index, observation in enumerate(calculation.get("observations", []))]
+            if calculation.get("run"):
+                steps.append({
+                    "sequence": len(steps) + 1,
+                    "title": "执行登记公式",
+                    "result_value": calculation["run"].get("result", {}).get("value"),
+                    "unit": calculation["run"].get("result", {}).get("unit"),
+                })
+        else:
+            steps = []
+
+        sources: list[dict[str, Any]] = []
+        if audit:
+            sources.extend(audit["evidence"])
+        if current.get("source_id") and not any(item.get("source_id") == current.get("source_id") for item in sources):
+            sources.append({
+                key: current.get(key) for key in (
+                    "source_id", "source_type", "title", "publisher", "url", "final_url",
+                    "locator", "source_sha256", "license_or_access", "checked_utc",
+                ) if current.get(key) is not None
+            })
+        tool_timeline = list(audit["tool_runs"]) if audit else [
+            {"sequence": index + 1, "tool_id": tool, "status": "complete"}
+            for index, tool in enumerate(current.get("searched_tools", []))
+        ]
+        risks = []
+        risk_tier = current.get("risk_tier")
+        if risk_tier:
+            risks.append({"risk_tier": risk_tier, "reason": current.get("risk_reason") or current.get("explanation") or "按证据等级处理。"})
+        human_actions = []
+        if audit:
+            human_actions.extend(
+                decision for decision in audit["decisions"]
+                if decision.get("decision") in {"manual_required", "source_conflict"}
+            )
+        if node["acquisition_status"] == "manual_required" and not human_actions:
+            human_actions.append({
+                "reason_code": current.get("reason_code", "manual_required"),
+                "title": current.get("explanation", "需要人工确认剩余业务口径。"),
+            })
+
+        method_id = (
+            (calculation or {}).get("plan", {}).get("method_id")
+            or current.get("method_id")
+            or (card.method_id if card else None)
+        )
+        formula = next((step.get("formula") for step in steps if step.get("formula")), None)
+        substitution = next((step.get("substitution") for step in steps if step.get("substitution")), None)
+        value_text = "尚未形成数值" if node["value"] is None else f"{node['value']} {node['unit'] or ''}".strip()
+        return {
+            "task_id": task_id,
+            "node_id": node_id,
+            "node_key": node["node_key"],
+            "field": node["label"],
+            "label": node["label"],
+            "value": node["value"],
+            "unit": node["unit"],
+            "objective": (
+                f"计算{node['label']}，作为{INDICATOR_LABELS.get(indicator_id, indicator_id or '当前指标')}核算的输入。"
+                if node["kind"] == "input" else f"汇总{node['label']}所需数据并判断能否进入核算。"
+            ),
+            "required_inputs": required_inputs,
+            "method": {
+                "method_id": method_id,
+                "formula": formula,
+                "standard_clause": card.standard_clause if card else current.get("standard_clause"),
+                "reason": current.get("explanation") or "按已登记方法和可追溯输入执行。",
+            },
+            "substitution": substitution or (f"当前已取得：{value_text}" if node["value"] is not None else "输入尚未齐全，暂不代入公式。"),
+            "steps": steps,
+            "result_interpretation": (
+                f"当前结果为 {value_text}；仅按其证据等级进入智能试算或审核。"
+                if node["value"] is not None else "当前尚无可采用结果，系统保留已完成检索并列出下一步。"
+            ),
+            "sources": sources,
+            "tool_timeline": tool_timeline,
+            "risks": risks,
+            "human_actions": human_actions,
+        }
 
     def snapshots(self, task_id: str) -> list[dict[str, Any]]:
         """List immutable snapshots for task recovery without exposing mutable graph state."""

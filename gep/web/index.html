@@ -66,17 +66,20 @@
   </main>
   <div id="drawer-overlay" class="drawer-overlay" hidden>
     <aside id="detail-drawer" class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true" tabindex="-1">
-      <header class="drawer-header"><div><p class="eyebrow">数据来源与审核</p><h2 id="drawer-title">数据节点</h2><p id="drawer-status" class="status-line">已自动采用·待整批确认</p></div><button id="close-drawer" class="icon-button" aria-label="关闭详情">×</button></header>
+      <header class="drawer-header"><div><p class="eyebrow">核算过程与审核</p><h2 id="drawer-title">数据节点</h2><p id="drawer-status" class="status-line">已自动采用·待整批确认</p></div><button id="close-drawer" class="icon-button" aria-label="关闭详情">×</button></header>
       <button id="drawer-back" class="drawer-back" type="button" hidden>← 返回科目详情</button>
       <div id="drawer-indicator-view" class="drawer-view" hidden><p id="detail-description">按核算要素、来源和审核状态组织数据支路。</p><div id="fishbone" class="fishbone" aria-label="产品数据鱼骨图"></div></div>
       <div id="drawer-evidence-view" class="drawer-view" hidden>
-        <section class="evidence-result"><span>当前结果</span><strong id="evidence-value">待补充</strong><span id="evidence-unit"></span></section>
-        <section><h3>数据来源</h3><div id="source-card" class="source-card">尚无可核验来源。</div></section>
-        <section><h3>自动校验</h3><p id="evidence-validation">尚未形成校验结论。</p></section>
-        <details><summary>工作执行记录</summary><div id="tool-record" class="tool-record">尚无工具执行记录。</div></details>
-        <section><h3>方法、范围与风险</h3><div id="method-card" class="method-card">尚未加载。</div></section>
-        <section><h3>自动计算过程</h3><div id="calculation-chain">尚未形成计算链。</div></section>
-        <div id="evidence-actions" class="dialog-actions"><button type="button">标记问题</button><button type="button">人工修正</button></div>
+        <section><h3>核算对象</h3><div id="accounting-object" class="lesson-card">尚未加载。</div></section>
+        <section><h3>本步目标</h3><p id="detail-objective">说明这一步解决什么问题。</p></section>
+        <section><h3>所需输入</h3><div id="required-inputs" class="lesson-list">尚未加载。</div></section>
+        <section><h3>计算方法</h3><div id="detail-method" class="lesson-card">尚未加载。</div></section>
+        <section><h3>代入与计算</h3><div id="detail-substitution" class="lesson-card">尚未加载。</div><ol id="detail-steps" class="calculation-steps"></ol></section>
+        <section><h3>结果怎么理解</h3><p id="result-interpretation">尚未形成结果解释。</p></section>
+        <section><h3>数据来源</h3><div id="detail-sources" class="lesson-list">尚无可核验来源。</div></section>
+        <details><summary>工作执行记录</summary><div id="tool-timeline" class="tool-record">尚无工具执行记录。</div></details>
+        <section><h3>风险与人工事项</h3><div id="risk-actions" class="lesson-list">尚未形成风险结论。</div></section>
+        <section><h3>审核操作</h3><div id="evidence-actions" class="dialog-actions"><button type="button">标记问题</button><button type="button">人工修正</button></div></section>
       </div>
     </aside>
   </div>

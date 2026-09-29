@@ -176,6 +176,58 @@ class GuidedBrowserUxTests(unittest.TestCase):
         self.assertEqual(page.locator("button:visible", has_text="恢复任务").count(), 5)
         page.close()
 
+    def test_slower_old_agent_detail_cannot_overwrite_new_drawer_selection(self):
+        """Break caught: rapidly choosing two fields could show the first field under the second field's title."""
+        page = self.browser.new_page()
+        page.add_init_script("""
+          const originalFetch = window.fetch.bind(window);
+          window.fetch = async (...args) => {
+            const response = await originalFetch(...args);
+            const url = String(args[0]);
+            if (url.includes('/nodes/input-one/agent-detail')) await new Promise(resolve => setTimeout(resolve, 300));
+            return response;
+          };
+        """)
+        task = {"task_id":"task-drawer","year":2024,"graph_version":1,"pending_review_count":2,"formal_blocker_count":2,"data_version":"smart-data-2024-v1"}
+        indicator = {"node_id":"indicator-r1","node_key":"R1","kind":"indicator","label":"水源涵养","category":"regulating","acquisition_status":"ready","review_status":"unsubmitted","applicability_status":"applicable","value":None,"version":1,"evidence":{}}
+        inputs = [
+            {"node_id":"input-one","node_key":"R1.ecosystem_area","parent_key":"R1","kind":"input","label":"ecosystem_area","category":"regulating","acquisition_status":"candidate_ready","review_status":"pending_review","applicability_status":"applicable","value":10,"unit":"hm2","version":1,"evidence":{}},
+            {"node_id":"input-two","node_key":"R1.precipitation","parent_key":"R1","kind":"input","label":"precipitation","category":"regulating","acquisition_status":"candidate_ready","review_status":"pending_review","applicability_status":"applicable","value":20,"unit":"mm/a","version":1,"evidence":{}},
+        ]
+
+        def detail(node, objective):
+            return {"task_id":"task-drawer","node_id":node["node_id"],"node_key":node["node_key"],"field":node["label"],"label":node["label"],"value":node["value"],"unit":node["unit"],"objective":objective,"required_inputs":[],"method":{"method_id":"demo.v1","formula":"a × b","standard_clause":"A.1","reason":"演示"},"substitution":"演示代入","steps":[],"result_interpretation":"演示结果","sources":[],"tool_timeline":[],"risks":[],"human_actions":[]}
+
+        def api(route):
+            path = route.request.url.split("/api", 1)[1].split("?", 1)[0]
+            if path == "/tasks": return route.fulfill(json={"tasks":[task]})
+            if path == "/tasks/task-drawer/supplements:auto": return route.fulfill(json={})
+            if path == "/tasks/task-drawer/graph": return route.fulfill(json={"task":task,"nodes":[indicator,*inputs]})
+            if path == "/tasks/task-drawer/snapshots": return route.fulfill(json={"snapshots":[]})
+            if path == "/tasks/task-drawer/events": return route.fulfill(json={"events":[]})
+            if path == "/tasks/task-drawer/automation-summary": return route.fulfill(json={"result_classes":{},"human_work":[],"indicator_progress":{"R1":{"total":2,"prepared":2,"active":0,"manual":0,"status":"ready"}}})
+            if path == "/tasks/task-drawer/demo-readiness": return route.fulfill(json={"demo_ready":False,"formal_ready":False,"estimated_input_ratio":1})
+            if path == "/data-assets": return route.fulfill(json={"assets":[]})
+            if path == "/nodes/input-one/evidence": return route.fulfill(json=inputs[0])
+            if path == "/nodes/input-two/evidence": return route.fulfill(json=inputs[1])
+            if path == "/tasks/task-drawer/nodes/input-one/agent-detail": return route.fulfill(json=detail(inputs[0], "第一节点目标"))
+            if path == "/tasks/task-drawer/nodes/input-two/agent-detail": return route.fulfill(json=detail(inputs[1], "第二节点目标"))
+            return route.fulfill(json={})
+
+        page.route("**/api/**", api)
+        page.goto(self.base_url, wait_until="networkidle")
+        page.get_by_role("button", name="恢复任务").click()
+        page.locator('[data-page-panel="prepare"]').wait_for(state="visible")
+        page.locator('[data-node="R1"]').click()
+        fields = page.locator(".product-field")
+        fields.nth(0).click()
+        fields.nth(1).click()
+        page.locator("#detail-objective").get_by_text("第二节点目标").wait_for()
+        page.wait_for_timeout(400)
+        self.assertEqual(page.locator("#detail-objective").inner_text(), "第二节点目标")
+        self.assertIn("降水量（precipitation）", page.locator("#drawer-title").inner_text())
+        page.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -800,6 +800,39 @@ class TaskServiceTests(unittest.TestCase):
         finally:
             other.close()
 
+    def test_agent_detail_returns_complete_teaching_contract(self):
+        """Break caught: the drawer API could expose a value without explaining inputs, method, steps, and sources."""
+        from gep.agent.store import AgentStore
+
+        task = self.store.create_task("110108", 2024, "demo", "GB/T 46869-2025", "smart-data-2024-v1")
+        node = self.store.node(task["task_id"], "R1.ecosystem_area")
+        agent = AgentStore(self.store.connection)
+        run_id = "agent-detail-run"
+        agent.start_run({"run_id": run_id, "task_id": task["task_id"], "node_id": node["node_id"], "status": "complete", "created_utc": "2026-09-29T00:00:00Z"})
+        agent.record_tool_run({"tool_run_id": "tool-1", "run_id": run_id, "node_id": node["node_id"], "sequence": 1, "tool_id": "web.search", "status": "ok", "elapsed_ms": 12, "created_utc": "2026-09-29T00:00:01Z"})
+        agent.record_evidence({"evidence_id": "evidence-1", "run_id": run_id, "node_id": node["node_id"], "source_id": "official-1", "source_type": "official_web", "risk_tier": "B", "title": "海淀区生态公报", "publisher": "海淀区政府", "url": "https://example.gov.cn/report", "locator": "表 2", "source_sha256": "a" * 64, "checked_utc": "2026-09-29T00:00:02Z", "created_utc": "2026-09-29T00:00:02Z"})
+        agent.record_calculation_step({"step_id": "step-1", "run_id": run_id, "node_id": node["node_id"], "sequence": 1, "formula": "绿色像元 × 100 m2", "substitution": "2304415 × 100", "result_value": 23044.15, "unit": "hm2", "created_utc": "2026-09-29T00:00:03Z"})
+        agent.record_decision({"decision_id": "decision-1", "run_id": run_id, "node_id": node["node_id"], "decision": "candidate", "reason": "official public calculation", "created_utc": "2026-09-29T00:00:04Z"})
+
+        detail = self.store.agent_detail(task["task_id"], node["node_id"])
+        expected = {
+            "objective", "required_inputs", "method", "substitution", "steps",
+            "result_interpretation", "sources", "tool_timeline", "risks", "human_actions",
+        }
+        self.assertTrue(expected <= set(detail))
+        self.assertEqual(detail["field"], "ecosystem_area")
+        self.assertEqual(detail["tool_timeline"][0]["tool_id"], "web.search")
+        self.assertEqual(detail["sources"][0]["title"], "海淀区生态公报")
+        self.assertEqual(detail["steps"][0]["result_value"], 23044.15)
+
+    def test_agent_detail_rejects_node_from_another_task(self):
+        """Break caught: a task-scoped detail route could disclose another task's evidence."""
+        first = self.store.create_task("110108", 2024, "demo", "GB/T 46869-2025", "smart-data-2024-v1")
+        second = self.store.create_task("110108", 2024, "demo", "GB/T 46869-2025", "smart-data-2024-v1")
+        other_node = self.store.node(second["task_id"], "R1.ecosystem_area")
+        with self.assertRaises(KeyError):
+            self.store.agent_detail(first["task_id"], other_node["node_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

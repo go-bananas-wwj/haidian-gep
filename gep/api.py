@@ -87,7 +87,7 @@ class DemoApi:
         try:
             if method == "GET" and path == "/":
                 return self._html_response(start_response, (Path(__file__).parent / "web" / "index.html").read_bytes())
-            if method == "GET" and len(parts) == 1 and parts[0] in {"styles.css", "api.js", "graph.js", "guide.js", "map.js", "smart-data.js", "app.js"}:
+            if method == "GET" and len(parts) == 1 and parts[0] in {"styles.css", "api.js", "graph.js", "guide.js", "labels.js", "map.js", "smart-data.js", "app.js"}:
                 return self._asset_response(start_response, Path(__file__).parent / "web" / parts[0])
             if method == "GET" and path == "/health":
                 return self._response(start_response, 200, {"status": "ok"})
@@ -189,6 +189,9 @@ class DemoApi:
                     return self._response(start_response, 200, self.store.snapshot_export(parts[1]))
             if len(parts) >= 2 and parts[0] == "tasks":
                 task_id = parts[1]
+                if (method == "GET" and len(parts) == 5 and parts[2] == "nodes"
+                        and parts[4] == "agent-detail"):
+                    return self._response(start_response, 200, self.store.agent_detail(task_id, parts[3]))
                 if method == "GET" and parts[2:] == ["graph"]:
                     return self._response(start_response, 200, self.store.graph(task_id))
                 if method == "GET" and parts[2:] == ["readiness"]:

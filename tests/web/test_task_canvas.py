@@ -145,15 +145,30 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn("await taskApi.autoSupplement", app)
 
     def test_a1_drawer_is_source_first_and_has_no_model_monologue_heading(self):
-        """Break caught: the drawer could keep foregrounding the model instead of the evidence."""
+        """Break caught: the drawer could keep foregrounding the model instead of the calculation lesson."""
         index = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
 
         self.assertNotIn("智能体如何补充", index)
-        self.assertIn("数据来源", index)
-        self.assertIn("自动校验", index)
-        self.assertLess(index.index("数据来源"), index.index("工作执行记录"))
+        headings = (
+            "核算对象", "本步目标", "所需输入", "计算方法", "代入与计算",
+            "结果怎么理解", "数据来源", "工作执行记录", "风险与人工事项", "审核操作",
+        )
+        positions = [index.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
         self.assertIn("已自动采用·待整批确认", index)
         self.assertIn("标记问题", index)
+
+    def test_drawer_uses_chinese_first_field_labels_and_agent_detail_api(self):
+        """Break caught: raw program fields and English statuses could leak into the first-time user view."""
+        labels = (WEB_ROOT / "labels.js").read_text(encoding="utf-8")
+        app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+        api = (WEB_ROOT / "api.js").read_text(encoding="utf-8")
+        self.assertIn('ecosystem_area: "生态系统面积"', labels)
+        self.assertIn("fieldLabel", app)
+        self.assertIn("taskApi.agentDetail", app)
+        self.assertIn("agent-detail", api)
+        self.assertIn("requestVersion !== drawerRequestVersion", app)
+        self.assertNotIn('textContent = evidence.applicability_status', app)
 
     def test_task_ui_distinguishes_a_b_gap_c_and_failure(self):
         """Break caught: completed automatic research could still look like blanket manual intervention."""

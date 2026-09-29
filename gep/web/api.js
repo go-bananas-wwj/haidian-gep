@@ -15,6 +15,7 @@ export const taskApi = {
   automationSummary: taskId => api(`/tasks/${taskId}/automation-summary`),
   demoReadiness: taskId => api(`/tasks/${taskId}/demo-readiness`),
   calculationChain: nodeId => api(`/nodes/${nodeId}/calculation-chain`),
+  agentDetail: (taskId, nodeId) => api(`/tasks/${taskId}/nodes/${nodeId}/agent-detail`),
   demoSnapshot: taskId => api(`/tasks/${taskId}/demo-snapshots`, { method:"POST", body:"{}" }),
   create: payload => api("/tasks", { method:"POST", body:JSON.stringify(payload) }), snapshot: taskId => api(`/tasks/${taskId}/snapshots`, { method:"POST", body:"{}" }),
   supplement: (taskId, payload) => api(`/tasks/${taskId}/supplement`, { method:"POST", body:JSON.stringify(payload) }),

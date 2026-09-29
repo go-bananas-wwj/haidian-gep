@@ -2,7 +2,8 @@ import { taskApi } from "./api.js";
 import { GepGraph, nodeState } from "./graph.js";
 import { renderMap } from "./map.js";
 import { nextActionFor } from "./guide.js";
-import { renderAssetCatalog, renderCalculationChain, renderHumanWork } from "./smart-data.js";
+import { renderAssetCatalog, renderHumanWork } from "./smart-data.js";
+import { fieldLabel, formatField, statusLabel } from "./labels.js";
 
 const $ = selector => document.querySelector(selector);
 const state = { task:null, nodes:[], snapshotId:null, lastEvent:0, eventTimer:null, graph:null, selected:null, selectedIndicator:null, selectedDescription:"", drawerMode:null, batchPreview:null, individualReviewMode:false, appendix:null, automation:null, demoReadiness:null, assets:[] };
@@ -171,51 +172,82 @@ function openIndicatorDrawer(node, description, trigger = document.activeElement
   showDrawer(trigger);
 }
 function currentEvidence(node) { return node.evidence?.current || node.evidence || {}; }
-function validationText(evidence) {
-  const current = currentEvidence(evidence); const tier = current.risk_tier;
-  if (tier === "A") return "高可信：字段、区域、年度、单位和证据身份均通过自动校验，已进入整批确认池。";
-  if (tier === "B") return `建议复核：${current.risk_reason || current.explanation || "来源可信，但存在代理变量、转换或口径差异。"}`;
-  if (tier === "GAP") return current.explanation || "允许的本地、官方和空间工具均已执行，尚未取得可用数值。";
-  if (tier === "C") return current.explanation || "存在冲突、权限或方法判断，需要专家介入。";
-  if (evidence.value !== null) return "已形成候选值，等待证据风险分级。";
-  return "当前节点不会把空白自动解释为零。";
+
+function appendLessonRow(container, title, value, meta = "") {
+  const row = document.createElement("article"); row.className = "lesson-row";
+  const strong = document.createElement("strong"); strong.textContent = title;
+  const span = document.createElement("span"); span.textContent = value;
+  row.append(strong, span);
+  if (meta) { const small = document.createElement("small"); small.textContent = meta; row.append(small); }
+  container.append(row);
 }
-function sourceHtml(source) {
-  if (!source || !Object.keys(source).length) return "尚无可核验来源。";
-  const current = source.current || source; const original = source.original || {};
-  const sourceId = current.source_id || original.source_id || "未登记来源 ID";
-  const title = current.title || sourceId; const publisher = current.publisher || "";
-  const file = current.source_file || original.source_file || "来源文件待补充";
-  const locator = current.locator || original.locator || [original.table_id && `表 ${original.table_id}`, original.printed_page && `印刷页 ${original.printed_page}`].filter(Boolean).join("，") || "定位信息待补充";
-  const url = current.final_url || current.url; const link = /^https:\/\//.test(url || "") ? `<br><a href="${escape(url)}" target="_blank" rel="noopener">查看官方原文</a>` : "";
-  return `<strong>${escape(title)}</strong>${publisher ? `<br>${escape(publisher)}` : ""}<br><span class="muted">${escape(file)}<br>定位：${escape(locator)}</span>${link}`;
+
+function safeSourceLink(url) {
+  try { const parsed = new URL(url); return parsed.protocol === "https:" ? parsed.href : null; }
+  catch (_) { return null; }
 }
-function methodHtml(node) {
-  const e = node.evidence || {}; const original = e.original || e; const current = currentEvidence(node);
-  return `风险等级：${escape(current.risk_tier || "待分级")}<br>适用性：${escape(node.applicability_status)}<br>方法：${escape(original.method_id || "方法卡待确认")}<br>标准条款：${escape(original.standard_clause || "待补充")}<br>当前状态：${escape(nodeState(node)[0])}`;
-}
-function toolRecordText(node) {
-  const current = currentEvidence(node); const tools = current.searched_tools || [];
-  const lines = [];
-  if (tools.length) lines.push(`已执行：${tools.join(" → ")}`);
-  if (current.tool_run_id) lines.push(`工具运行：${current.tool_run_id}`);
-  if (current.online_status) lines.push(`官方来源在线校验：${current.online_status}`);
-  if (current.aef_result && current.aef_result.status !== "not_applicable") {
-    const missing = current.aef_result.missing_prerequisites || [];
-    lines.push(`AEF 资产检查：${current.aef_result.status}${missing.length ? `；缺少 ${missing.join("、")}` : ""}`);
+
+function renderAgentDetail(detail) {
+  const value = detail.value === null ? "尚无数值" : `${detail.value} ${detail.unit || ""}`.trim();
+  $("#accounting-object").replaceChildren(); appendLessonRow($("#accounting-object"), formatField(detail.field), value, detail.node_key);
+  $("#detail-objective").textContent = detail.objective;
+
+  const inputs = $("#required-inputs"); inputs.replaceChildren();
+  for (const input of detail.required_inputs || []) {
+    const inputValue = input.value === null ? "尚未取得" : `${input.value} ${input.unit || ""}`.trim();
+    appendLessonRow(inputs, formatField(input.field), inputValue, `${statusLabel(input.status)} · ${statusLabel(input.review_status)}`);
   }
-  return lines.join("\n") || "尚无工具执行记录。";
+  if (!inputs.children.length) inputs.textContent = "该步骤没有需要展示的底层输入。";
+
+  const method = $("#detail-method"); method.replaceChildren();
+  appendLessonRow(method, "方法", detail.method?.method_id || "方法尚待确认", detail.method?.standard_clause || "标准条款待确认");
+  if (detail.method?.formula) appendLessonRow(method, "公式", detail.method.formula);
+  if (detail.method?.reason) { const reason = document.createElement("p"); reason.textContent = detail.method.reason; method.append(reason); }
+
+  $("#detail-substitution").textContent = detail.substitution;
+  const steps = $("#detail-steps"); steps.replaceChildren();
+  for (const step of detail.steps || []) {
+    const item = document.createElement("li");
+    const parts = [step.title, step.formula, step.substitution].filter(Boolean);
+    const stepResult = step.result_value === undefined ? "" : `得到 ${step.result_value} ${step.unit || ""}`.trim();
+    item.textContent = `${parts.join("；")}${stepResult ? `；${stepResult}` : ""}` || `完成第 ${step.sequence || steps.children.length + 1} 步`;
+    steps.append(item);
+  }
+  if (!steps.children.length) { const item = document.createElement("li"); item.textContent = "输入尚未齐全，暂未执行数值计算。"; steps.append(item); }
+  $("#result-interpretation").textContent = detail.result_interpretation;
+
+  const sources = $("#detail-sources"); sources.replaceChildren();
+  for (const source of detail.sources || []) {
+    const row = document.createElement("article"); row.className = "lesson-row";
+    const title = document.createElement("strong"); title.textContent = source.title || source.source_id || "未命名来源";
+    const publisher = document.createElement("span"); publisher.textContent = source.publisher || source.source_type || "来源类型待确认";
+    const locator = document.createElement("small"); locator.textContent = `定位：${source.locator || "待补充"}`;
+    row.append(title, publisher, locator);
+    const href = safeSourceLink(source.final_url || source.url);
+    if (href) { const link = document.createElement("a"); link.href = href; link.target = "_blank"; link.rel = "noopener"; link.textContent = "查看原文"; row.append(link); }
+    sources.append(row);
+  }
+  if (!sources.children.length) sources.textContent = "尚无可核验来源；已完成的搜索记录见下方。";
+
+  const timeline = $("#tool-timeline"); timeline.replaceChildren();
+  for (const run of detail.tool_timeline || []) appendLessonRow(timeline, `第 ${run.sequence || timeline.children.length + 1} 步`, run.tool_id || "登记工具", statusLabel(run.status));
+  if (!timeline.children.length) timeline.textContent = "尚无工具执行记录。";
+
+  const risk = $("#risk-actions"); risk.replaceChildren();
+  for (const item of detail.risks || []) appendLessonRow(risk, `证据等级 ${item.risk_tier || "待分级"}`, item.reason || "按证据等级处理");
+  for (const action of detail.human_actions || []) appendLessonRow(risk, "需要人工确认", action.title || action.reason || action.reason_code || "确认剩余事项");
+  if (!risk.children.length) risk.textContent = "当前没有新增人工事项；正式采用仍遵循审核闸门。";
 }
 async function openEvidenceDrawer(node, parentIndicator = state.selectedIndicator, trigger = document.activeElement) {
   const requestVersion = ++drawerRequestVersion;
   try {
-    const evidence = await taskApi.evidence(node.node_id); const [label] = nodeState(evidence);
+    const [evidence, detail] = await Promise.all([
+      taskApi.evidence(node.node_id), taskApi.agentDetail(state.task.task_id, node.node_id),
+    ]); const [label] = nodeState(evidence);
     if (requestVersion !== drawerRequestVersion) return;
     state.selected = evidence; state.selectedIndicator = parentIndicator; state.drawerMode = "evidence";
-    $("#drawer-title").textContent = `${evidence.node_key} · ${evidence.label}`; $("#drawer-status").textContent = `${label} · 输入版本 ${evidence.version}`;
-    $("#evidence-value").textContent = evidence.value === null ? "尚无数值" : evidence.value; $("#evidence-unit").textContent = evidence.unit || "";
-    $("#source-card").innerHTML = sourceHtml(evidence.evidence); $("#evidence-validation").textContent = validationText(evidence); $("#tool-record").textContent = toolRecordText(evidence); $("#method-card").innerHTML = methodHtml(evidence);
-    try { renderCalculationChain($("#calculation-chain"), await taskApi.calculationChain(evidence.node_id)); } catch (_) { renderCalculationChain($("#calculation-chain"), null); }
+    $("#drawer-title").textContent = `${evidence.node_key} · ${formatField(detail.field)}`; $("#drawer-status").textContent = `${label} · 输入版本 ${evidence.version}`;
+    renderAgentDetail(detail);
     const actions = $("#evidence-actions"); actions.replaceChildren();
     if (evidence.review_status === "auto_verified") {
       if (state.individualReviewMode) actions.append(reviewButton(evidence, "approved", "确认采用", true));

@@ -641,6 +641,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("GEP", payload["html"])
 
+    def test_agent_detail_route_is_task_scoped_and_complete(self):
+        """Break caught: the browser could not retrieve one coherent calculation explanation for a node."""
+        _, first, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "demo",
+            "standard_version": "GB/T 46869-2025", "data_version": "smart-data-2024-v1",
+        })
+        _, second, _ = self.request("POST", "/tasks", {
+            "region_code": "110108", "year": 2024, "boundary_version": "demo",
+            "standard_version": "GB/T 46869-2025", "data_version": "smart-data-2024-v1",
+        })
+        first_node = self.app.store.node(first["task_id"], "R1.ecosystem_area")
+        second_node = self.app.store.node(second["task_id"], "R1.ecosystem_area")
+
+        status, detail, _ = self.request(
+            "GET", f"/tasks/{first['task_id']}/nodes/{first_node['node_id']}/agent-detail"
+        )
+        denied, _, _ = self.request(
+            "GET", f"/tasks/{first['task_id']}/nodes/{second_node['node_id']}/agent-detail"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(denied, 404)
+        self.assertTrue({
+            "objective", "required_inputs", "method", "substitution", "steps",
+            "result_interpretation", "sources", "tool_timeline", "risks", "human_actions",
+        } <= set(detail))
+
 
 if __name__ == "__main__":
     unittest.main()
