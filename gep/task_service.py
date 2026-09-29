@@ -817,8 +817,8 @@ class GepStore:
             raise ValueError("workflow candidate requires a unit")
         evidence = GepStore._validated_workflow_evidence(evidence)
         risk_tier = str(payload.get("risk_tier") or "B")
-        if risk_tier not in {"A", "B"}:
-            raise ValueError("workflow candidate risk tier must be A or B")
+        if risk_tier not in {"A", "B", "C"}:
+            raise ValueError("workflow candidate risk tier must be A, B, or C")
         return {
             "outcome": "candidate",
             "risk_tier": risk_tier,

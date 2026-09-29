@@ -109,6 +109,51 @@ class DeepSeekWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             workflow_from_environment({"SUPPLEMENT_PROVIDER": "unknown"})
 
+    def test_agent_flag_selects_native_workflow_with_database_path(self):
+        """Break caught: enabling the native agent could still return the legacy fixed research workflow."""
+        from gep.supplement import workflow_from_environment
+
+        with patch("gep.supplement.AgentWorkflow.from_environment", return_value="native-agent") as factory:
+            workflow = workflow_from_environment(
+                {"GEP_AGENT_ENABLED": "1", "GEP_DATA_ROOT": "/data", "DEEPSEEK_API_KEY": "key"},
+                database_path="/runtime/tasks.sqlite3",
+            )
+        self.assertEqual(workflow, "native-agent")
+        factory.assert_called_once()
+        self.assertEqual(factory.call_args.kwargs["database_path"], "/runtime/tasks.sqlite3")
+
+    def test_agent_flag_requires_database_but_not_deepseek(self):
+        """Break caught: missing model credentials could disable deterministic local agent tools."""
+        from gep.agent.planner import TemplatePlanner
+        from gep.supplement import workflow_from_environment
+
+        with self.assertRaisesRegex(ValueError, "database"):
+            workflow_from_environment({"GEP_AGENT_ENABLED": "1"})
+        workflow = workflow_from_environment(
+            {"GEP_AGENT_ENABLED": "1", "GEP_DATA_ROOT": "/data"},
+            database_path=":memory:",
+        )
+        try:
+            self.assertIsInstance(workflow.planner, TemplatePlanner)
+        finally:
+            workflow.close()
+
+    def test_agent_flag_off_keeps_legacy_deepseek_and_dify_adapters(self):
+        """Break caught: the rollback flag could stop selecting the previous provider implementations."""
+        from gep.deepseek import DeepSeekWorkflow
+        from gep.dify import DifyWorkflow
+        from gep.supplement import workflow_from_environment
+
+        deepseek = workflow_from_environment({
+            "GEP_AGENT_ENABLED": "0", "SUPPLEMENT_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "key",
+        })
+        dify = workflow_from_environment({
+            "GEP_AGENT_ENABLED": "0", "SUPPLEMENT_PROVIDER": "dify",
+            "DIFY_API_BASE_URL": "https://dify.internal", "DIFY_API_KEY": "key",
+        })
+        self.assertIsInstance(deepseek, DeepSeekWorkflow)
+        self.assertIsInstance(dify, DifyWorkflow)
+
     def test_explicit_empty_environment_does_not_inherit_process_credentials(self):
         """Break caught: a caller requesting no provider could accidentally inherit a real process key."""
         from gep.deepseek import DeepSeekWorkflow

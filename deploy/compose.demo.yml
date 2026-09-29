@@ -23,6 +23,9 @@ services:
     environment:
       GEP_DATA_ROOT: /var/lib/haidian-gep-data
       GEP_SMART_DATA_ENABLED: ${GEP_SMART_DATA_ENABLED:-1}
+      GEP_AGENT_ENABLED: ${GEP_AGENT_ENABLED:-0}
+      GEP_SEARCH_PROVIDER: ${GEP_SEARCH_PROVIDER:-duckduckgo}
+      GEP_SEARXNG_URL: ${GEP_SEARXNG_URL:-}
       # Provider credentials are injected only into this worker from a host-restricted environment.
       SUPPLEMENT_PROVIDER: ${SUPPLEMENT_PROVIDER:-none}
       DEEPSEEK_API_BASE_URL: ${DEEPSEEK_API_BASE_URL:-https://api.deepseek.com}

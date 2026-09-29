@@ -54,6 +54,15 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertIn("DIFY_API_KEY: ${DIFY_API_KEY:-}", worker_section)
         self.assertNotRegex(compose, r"(?i)(api_key|token):\s+sk-[A-Za-z0-9]")
 
+    def test_native_agent_search_configuration_is_worker_only(self):
+        """Break caught: the API could receive search credentials or the worker could start without its rollback flag."""
+        compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")
+        api_section = compose.split("  task-api:", 1)[1].split("  task-worker:", 1)[0]
+        worker_section = compose.split("  task-worker:", 1)[1].split("  task-web:", 1)[0]
+        for name in ("GEP_AGENT_ENABLED", "GEP_SEARCH_PROVIDER", "GEP_SEARXNG_URL"):
+            self.assertIn(name, worker_section)
+            self.assertNotIn(name, api_section)
+
     def test_worker_uses_the_same_persistent_runtime_without_publishing_a_port(self):
         """Break caught: an agent request could run in the API process or a second worker could get its own state."""
         compose = (Path(__file__).parents[1] / "deploy" / "compose.demo.yml").read_text(encoding="utf-8")

@@ -16,7 +16,7 @@ class SupplementWorker:
 
     def run_once(self) -> dict[str, Any] | None:
         if self.supplement_workflow is None:
-            self.supplement_workflow = workflow_from_environment()
+            self.supplement_workflow = workflow_from_environment(database_path=self.database_path)
         store = GepStore(self.database_path, supplement_workflow=self.supplement_workflow)
         try:
             return store.process_next_supplement()

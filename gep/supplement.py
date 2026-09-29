@@ -11,6 +11,7 @@ from .geo.aef_tool import AefSpatialTool
 from .official_sources import OfficialSourceRegistry
 from .research import ResearchWorkflow
 from .task_service import SupplementWorkflow
+from .agent.workflow import AgentWorkflow
 
 
 class EvidenceAwareWorkflow(ResearchWorkflow):
@@ -22,9 +23,15 @@ class EvidenceAwareWorkflow(ResearchWorkflow):
 
 def workflow_from_environment(
     environment: Mapping[str, str] | None = None,
+    *, database_path: str | os.PathLike[str] | None = None,
 ) -> SupplementWorkflow | None:
     if environment is None:
         environment = os.environ
+    agent_enabled = environment.get("GEP_AGENT_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+    if agent_enabled:
+        if database_path is None:
+            raise ValueError("native agent requires a database path")
+        return AgentWorkflow.from_environment(database_path=database_path, environment=environment)
     provider = environment.get("SUPPLEMENT_PROVIDER", "").strip().lower()
     if not provider:
         if environment.get("DEEPSEEK_API_KEY", "").strip():

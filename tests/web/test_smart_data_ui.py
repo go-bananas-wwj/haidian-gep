@@ -64,6 +64,7 @@ class SmartDataUiTests(unittest.TestCase):
         self.assertIn("7/8 已自动准备", page.locator('[data-node="R1"]').inner_text())
         self.assertNotIn("已自动检索·等待数据", page.locator('[data-node="R1"]').inner_text())
         page.get_by_role("tab",name="数据后台").click()
+        page.wait_for_function("document.querySelector('#asset-catalog')?.textContent.includes('2024 AlphaEarth')")
         self.assertIn("2024 AlphaEarth", page.locator('#asset-catalog').inner_text())
         self.assertIn("等待部门数据", page.locator('#human-work').inner_text())
         self.assertIn("已合并为 1 个部门数据包", page.locator('#human-work').inner_text())
