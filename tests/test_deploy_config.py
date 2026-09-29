@@ -62,6 +62,7 @@ class DeploymentConfigTests(unittest.TestCase):
         for name in ("GEP_AGENT_ENABLED", "GEP_SEARCH_PROVIDER", "GEP_SEARXNG_URL"):
             self.assertIn(name, worker_section)
             self.assertNotIn(name, api_section)
+        self.assertIn("GEP_AGENT_ENABLED: ${GEP_AGENT_ENABLED:-1}", worker_section)
 
     def test_worker_uses_the_same_persistent_runtime_without_publishing_a_port(self):
         """Break caught: an agent request could run in the API process or a second worker could get its own state."""

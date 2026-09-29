@@ -80,6 +80,21 @@ class KnowledgeIndexCliTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_sensitive_catalog_document_is_not_written_to_sqlite(self):
+        """Break caught: an API key in a catalog JSON could be copied into the searchable knowledge database."""
+        sensitive = self.data / "catalog" / "private.json"
+        sensitive.write_text(json.dumps({"api_key": "sensitive-value-that-must-not-be-stored"}), encoding="utf-8")
+        result = json.loads(self.run_cli().stdout)
+        self.assertEqual(result["indexed_count"], 3)
+        self.assertEqual(result["error_count"], 2)
+        connection = sqlite3.connect(self.database)
+        try:
+            payloads = "\n".join(row[0] for row in connection.execute("SELECT payload_json FROM knowledge_documents"))
+            chunks = "\n".join(row[0] for row in connection.execute("SELECT text FROM knowledge_chunks"))
+            self.assertNotIn("sensitive-value-that-must-not-be-stored", payloads + chunks)
+        finally:
+            connection.close()
+
 
 if __name__ == "__main__":
     unittest.main()

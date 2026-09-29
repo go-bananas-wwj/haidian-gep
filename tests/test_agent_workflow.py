@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 
 from gep.agent.store import AgentStore
@@ -104,6 +105,110 @@ class AgentWorkflowTests(unittest.TestCase):
             self.assertEqual(result["tool_error"], "RuntimeError")
             self.assertIn("web.search", result["searched_tools"])
             self.assertEqual(result["next_action"], "检查对应工具服务后自动重试")
+        finally:
+            workflow.close()
+
+    def test_model_failure_still_uses_exact_local_catalog_candidate(self):
+        """Break caught: a DeepSeek outage could hide an exact fact already admitted in the local catalog."""
+        from gep.agent.workflow import AgentWorkflow
+
+        registry = ToolRegistry()
+        registry.register(spec("smart.observation.search", ("metric", "year", "region_code")), lambda _a: ToolResult(status="ok", data={"records": []}))
+        local = {
+            "source_id": "local-area", "source_type": "admitted_observation", "raw_status": "observed",
+            "metric": "ecosystem_area", "value": 23044.15, "unit": "hm2",
+            "region_code": "110108", "year": 2024, "locator": "表 2",
+            "source_sha256": "c" * 64, "license_or_access": "project",
+            "tool_run_id": "catalog:1", "extracted_fragment": "ecosystem_area=23044.15 hm2",
+        }
+        registry.register(spec("local.catalog.search", ("work_order",)), lambda _a: ToolResult(status="ok", data={"records": [local]}, evidence=(local,)))
+        workflow = AgentWorkflow(self.database, registry, ScriptedPlanner([AgentAction(kind="manual_required", payload={"reason_code":"planner_unavailable"})]))
+        try:
+            result = workflow.run(dict(self.work_order))
+            self.assertEqual(result["outcome"], "candidate")
+            self.assertEqual(result["risk_tier"], "A")
+            self.assertEqual(result["value"], 23044.15)
+            self.assertEqual(result["evidence"]["source_id"], "local-area")
+        finally:
+            workflow.close()
+
+    def test_model_complete_candidate_without_tool_evidence_is_not_accepted(self):
+        """Break caught: a model could fabricate a value and evidence in its terminal payload."""
+        from gep.agent.workflow import AgentWorkflow
+
+        registry = ToolRegistry()
+        registry.register(spec("smart.observation.search", ("metric", "year", "region_code")), lambda _a: ToolResult(status="ok", data={"records": []}))
+        fabricated = {
+            "outcome": "candidate", "risk_tier": "A", "auto_adopt": True,
+            "value": 999999, "unit": "hm2", "explanation": "模型直接给值",
+            "evidence": {"source_id":"fake","source_type":"fake","locator":"fake","source_sha256":"f"*64,
+                         "license_or_access":"fake","tool_run_id":"fake","extracted_fragment":"fake"},
+        }
+        workflow = AgentWorkflow(self.database, registry, ScriptedPlanner([AgentAction(kind="complete", payload=fabricated)]))
+        try:
+            result = workflow.run(dict(self.work_order))
+            self.assertEqual(result["outcome"], "research_complete")
+            self.assertNotIn("value", result)
+        finally:
+            workflow.close()
+
+    def test_model_cannot_validate_evidence_that_no_tool_observed(self):
+        """Break caught: the model could invent an official record and ask the validator to bless it."""
+        from gep.agent.evidence import EvidenceValidator
+        from gep.agent.workflow import AgentWorkflow
+
+        registry = ToolRegistry()
+        registry.register(spec("smart.observation.search", ("metric", "year", "region_code")), lambda _a: ToolResult(status="ok", data={"records": []}))
+        registry.register(
+            spec("evidence.validate", ("target", "items")),
+            lambda a: ToolResult(status="ok", data=asdict(EvidenceValidator().validate(a["target"], a["items"]))),
+        )
+        invented = {
+            "source_id":"invented","source_type":"official_dataset","metric":"ecosystem_area",
+            "value":999999,"unit":"hm2","region_code":"110108","year":2024,"locator":"表 1",
+            "source_sha256":"d"*64,"checked_utc":"2026-09-29T00:00:00Z","license_or_access":"public",
+            "tool_run_id":"invented","extracted_fragment":"invented","reproducible":True,
+        }
+        planner = ScriptedPlanner([
+            AgentAction(kind="call_tool", tool_id="evidence.validate", arguments={"target":self.work_order | {"metric":"ecosystem_area","unit":"hm2"}, "items":[invented]}),
+            AgentAction(kind="complete", payload={"outcome":"candidate","value":999999,"unit":"hm2"}),
+        ])
+        workflow = AgentWorkflow(self.database, registry, planner)
+        try:
+            result = workflow.run(dict(self.work_order))
+            self.assertEqual(result["outcome"], "research_complete")
+            self.assertNotIn("value", result)
+        finally:
+            workflow.close()
+
+    def test_validated_item_must_match_prior_tool_evidence(self):
+        """Break caught: provenance matching could be so strict that real read-and-validate evidence never becomes a candidate."""
+        from gep.agent.evidence import EvidenceValidator
+        from gep.agent.workflow import AgentWorkflow
+
+        registry = ToolRegistry()
+        registry.register(spec("smart.observation.search", ("metric", "year", "region_code")), lambda _a: ToolResult(status="ok", data={"records": []}))
+        observed = {
+            "source_id":"official-area","source_type":"official_dataset","metric":"ecosystem_area",
+            "value":23044.15,"unit":"hm2","region_code":"110108","year":2024,"locator":"表 2",
+            "source_sha256":"e"*64,"checked_utc":"2026-09-29T00:00:00Z","license_or_access":"public",
+            "tool_run_id":"web.read:1","extracted_fragment":"area=23044.15 hm2","reproducible":True,
+        }
+        registry.register(spec("web.read", ("url",), network=True), lambda _a: ToolResult(status="ok", data={"document":{}}, evidence=(observed,)))
+        registry.register(spec("evidence.validate", ("target", "items")), lambda a: ToolResult(status="ok", data=asdict(EvidenceValidator().validate(a["target"], a["items"]))))
+        target={"metric":"ecosystem_area","region_code":"110108","year":2024,"unit":"hm2"}
+        planner = ScriptedPlanner([
+            AgentAction(kind="call_tool", tool_id="web.read", arguments={"url":"https://example.gov.cn/report"}),
+            AgentAction(kind="call_tool", tool_id="evidence.validate", arguments={"target":target,"items":[observed]}),
+            AgentAction(kind="complete", payload={"outcome":"research_complete","explanation":"已完成"}),
+        ])
+        workflow = AgentWorkflow(self.database, registry, planner)
+        try:
+            result = workflow.run(dict(self.work_order))
+            self.assertEqual(result["outcome"], "candidate")
+            self.assertEqual(result["risk_tier"], "B")
+            self.assertEqual(result["value"], 23044.15)
+            self.assertEqual(result["evidence"]["source_id"], "official-area")
         finally:
             workflow.close()
 

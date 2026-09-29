@@ -93,6 +93,13 @@ class AgentKernel:
                 raise TypeError("planner must return AgentAction")
             rounds += 1
             self.ledger.record("plan", {"round": rounds, "action": action})
+            now = self.clock()
+            if now - started >= self.budget.max_seconds:
+                return self._outcome(
+                    "budget_exhausted", result={}, observations=observations,
+                    reason="elapsed_budget", tool_calls=tool_calls, rounds=rounds,
+                    started=started, now=now,
+                )
 
             if action.kind == "complete":
                 return self._outcome(
@@ -121,6 +128,13 @@ class AgentKernel:
                     started=started, now=now,
                 )
             for call in calls:
+                now = self.clock()
+                if now - started >= self.budget.max_seconds:
+                    return self._outcome(
+                        "budget_exhausted", result={}, observations=observations,
+                        reason="elapsed_budget", tool_calls=tool_calls, rounds=rounds,
+                        started=started, now=now,
+                    )
                 if tool_calls >= self.budget.max_tool_calls:
                     return self._outcome(
                         "budget_exhausted", result={}, observations=observations,

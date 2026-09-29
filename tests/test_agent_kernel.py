@@ -140,6 +140,29 @@ class AgentKernelTests(unittest.TestCase):
         self.assertEqual(outcome.reason, "elapsed_budget")
         self.assertEqual(len(planner.contexts), 0)
 
+    def test_kernel_rechecks_elapsed_budget_after_slow_planning(self):
+        """Break caught: a planner taking longer than 60 seconds could still return a completed result."""
+        from gep.agent.kernel import AgentKernel
+        from gep.agent.types import AgentAction, AgentBudget
+
+        class Clock:
+            value = 100.0
+            def __call__(self): return self.value
+
+        clock = Clock()
+
+        class SlowPlanner:
+            def next_action(self, _context):
+                clock.value = 161.0
+                return AgentAction(kind="complete", payload={"message": "too late"})
+
+        outcome = AgentKernel(
+            self._registry([]), SlowPlanner(), PassThroughValidator(), RecordingLedger(),
+            budget=AgentBudget(max_tool_calls=8, max_rounds=3, max_seconds=60), clock=clock,
+        ).run({"node_id": "n1"})
+        self.assertEqual(outcome.status, "budget_exhausted")
+        self.assertEqual(outcome.reason, "elapsed_budget")
+
     def test_tool_text_cannot_create_an_unplanned_action(self):
         """Break caught: prompt-injection text in a page could be interpreted as an executable action."""
         from gep.agent.kernel import AgentKernel

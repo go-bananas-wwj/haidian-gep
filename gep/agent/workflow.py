@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
@@ -47,12 +48,14 @@ class _RunLedger:
         self.store = store
         self.run_id = run_id
         self.node_id = node_id
+        self.sequence = 0
 
     def record(self, event: str, payload: Any) -> None:
         if event != "tool_result":
             return
         result = payload["result"]
-        sequence = int(payload["sequence"])
+        self.sequence += 1
+        sequence = self.sequence
         tool_id = str(payload["tool_id"])
         self.store.record_tool_run({
             "run_id": self.run_id,
@@ -189,6 +192,70 @@ class AgentWorkflow:
             },
         }
 
+    @staticmethod
+    def _candidate_from_local(record: Mapping[str, Any], searched: list[str]) -> dict[str, Any] | None:
+        value = record.get("value")
+        unit = str(record.get("unit") or "").strip()
+        required = (
+            "source_id", "source_type", "locator", "source_sha256", "license_or_access",
+            "tool_run_id", "extracted_fragment",
+        )
+        if (not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value))
+                or not unit or any(not str(record.get(key, "")).strip() for key in required)):
+            return None
+        evidence = {key: record[key] for key in required}
+        return {
+            "outcome": "candidate",
+            "risk_tier": "A",
+            "auto_adopt": True,
+            "value": value,
+            "unit": unit,
+            "result_class": "admitted_observation",
+            "explanation": "本地准入记录与目标字段、区域、年度和单位精确匹配，已形成高可信候选。",
+            "searched_tools": list(searched),
+            "evidence": evidence,
+        }
+
+    @staticmethod
+    def _candidate_from_tool_results(observations: tuple[ToolResult, ...], searched: list[str]) -> dict[str, Any] | None:
+        observed_identities = {
+            (
+                str(item.get("source_id") or ""),
+                str(item.get("source_sha256") or item.get("content_sha256") or ""),
+            )
+            for result in observations for item in result.evidence
+        }
+        for observation in reversed(observations):
+            data = observation.data
+            accepted = data.get("accepted_items") if isinstance(data, Mapping) else None
+            tier = str(data.get("risk_tier") or "") if isinstance(data, Mapping) else ""
+            if accepted and tier in {"A", "B", "C"}:
+                item = dict(accepted[0])
+                value = item.get("normalized_value")
+                unit = str(item.get("normalized_unit") or "")
+                source_hash = item.get("source_sha256") or item.get("content_sha256")
+                identity = (str(item.get("source_id") or ""), str(source_hash or ""))
+                if identity not in observed_identities:
+                    continue
+                required = {
+                    "source_id": item.get("source_id"),
+                    "source_type": item.get("source_type"),
+                    "locator": item.get("locator"),
+                    "source_sha256": source_hash,
+                    "license_or_access": item.get("license_or_access"),
+                    "tool_run_id": item.get("tool_run_id") or "evidence.validate",
+                    "extracted_fragment": item.get("extracted_fragment") or f"{item.get('metric')}={value} {unit}",
+                }
+                if value is not None and unit and all(str(value or "").strip() for value in required.values()):
+                    return {
+                        "outcome": "candidate", "risk_tier": tier, "auto_adopt": tier == "A",
+                        "value": value, "unit": unit,
+                        "result_class": "public_calculation" if tier == "B" else ("model_estimate" if tier == "C" else "admitted_observation"),
+                        "explanation": "候选值来自已登记工具并通过地区、年度、单位和来源校验。",
+                        "searched_tools": list(searched), "evidence": required,
+                    }
+        return None
+
     def run(self, work_order: dict[str, Any]) -> dict[str, Any]:
         run_id = self._run_id(work_order)
         cached = self._cached(run_id)
@@ -204,6 +271,8 @@ class AgentWorkflow:
             })
 
         searched: list[str] = []
+        ledger = _RunLedger(self.store, run_id, str(work_order.get("node_id", "")))
+        sequence = 1
         metric = str(work_order.get("node_label") or work_order.get("target_metric") or "")
         try:
             observed = self.registry.call("smart.observation.search", {
@@ -212,6 +281,8 @@ class AgentWorkflow:
                 "region_code": str(work_order.get("region_code") or ""),
             })
             searched.append("smart.observation.search")
+            ledger.record("tool_result", {"sequence": sequence, "tool_id": "smart.observation.search", "result": observed})
+            sequence += 1
             records = list(observed.data.get("records", ()))
             if records:
                 distinct = {
@@ -242,7 +313,25 @@ class AgentWorkflow:
         else:
             observation_error = ""
 
-        ledger = _RunLedger(self.store, run_id, str(work_order.get("node_id", "")))
+        available_tools = {spec.tool_id for spec in self.registry.specs()}
+        if "local.catalog.search" in available_tools:
+            try:
+                local_result = self.registry.call("local.catalog.search", {"work_order": dict(work_order)})
+                searched.append("local.catalog.search")
+                ledger.record("tool_result", {"sequence": sequence, "tool_id": "local.catalog.search", "result": local_result})
+                sequence += 1
+                local_records = list(local_result.data.get("records", ()))
+                exact = [
+                    record for record in local_records
+                    if record.get("metric") == metric and record.get("raw_status") == "observed"
+                ]
+                if len(exact) == 1:
+                    local_candidate = self._candidate_from_local(exact[0], searched)
+                    if local_candidate is not None:
+                        return self._save(run_id, work_order, local_candidate)
+            except (KeyError, OSError, RuntimeError, ValueError) as error:
+                observation_error = observation_error or type(error).__name__
+
         try:
             outcome = AgentKernel(
                 self.registry, self.planner, _KernelValidation(), ledger, budget=self.budget,
@@ -259,7 +348,16 @@ class AgentWorkflow:
                 "tool_error": type(error).__name__,
             })
         result = dict(outcome.result)
-        if result.get("outcome") in {"candidate", "manual_required", "research_complete", "applicability_candidate"}:
+        searched.extend(
+            row[0] for row in self.store.connection.execute(
+                "SELECT tool_id FROM tool_runs WHERE run_id=? ORDER BY sequence", (run_id,)
+            ).fetchall()
+        )
+        searched = list(dict.fromkeys(searched))
+        grounded_candidate = self._candidate_from_tool_results(outcome.observations, searched)
+        if grounded_candidate is not None:
+            mapped = grounded_candidate
+        elif result.get("outcome") in {"manual_required", "research_complete"}:
             mapped = result
         elif outcome.status == "manual_required":
             mapped = {

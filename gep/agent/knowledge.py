@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -154,10 +155,20 @@ class KnowledgeBase:
         if not query or limit <= 0 or limit > 100:
             raise ValueError("query is required and limit must be between 1 and 100")
         clauses, parameters = self._filters(filters)
-        selected = (
-            "SELECT d.payload_json,c.text,c.locator AS chunk_locator "
-            "FROM knowledge_chunks c JOIN knowledge_documents d ON d.document_id=c.document_id"
-        )
+        def fallback_rows() -> list[sqlite3.Row]:
+            filter_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            sql = (
+                "WITH candidates AS ("
+                "SELECT d.payload_json,c.text,c.locator AS chunk_locator,c.rowid AS chunk_rowid "
+                "FROM knowledge_chunks c JOIN knowledge_documents d ON d.document_id=c.document_id "
+                f"{filter_sql} ORDER BY c.rowid LIMIT ?"
+                ") SELECT payload_json,text,chunk_locator FROM candidates "
+                "WHERE instr(text, ?) > 0 ORDER BY chunk_rowid LIMIT ?"
+            )
+            return self.connection.execute(
+                sql, [*parameters, self.fallback_scan_limit, query, limit]
+            ).fetchall()
+
         if self.fts_available:
             selected = (
                 "SELECT d.payload_json,c.text,c.locator AS chunk_locator "
@@ -169,25 +180,11 @@ class KnowledgeBase:
             where = ["knowledge_chunks_fts MATCH ?", *clauses]
             values = [f'"{escaped}"', *parameters, limit]
             sql = f"{selected} WHERE {' AND '.join(where)} ORDER BY bm25(knowledge_chunks_fts),d.document_id,c.sequence LIMIT ?"
+            rows = self.connection.execute(sql, values).fetchall()
         else:
-            where = ["instr(c.text, ?) > 0", *clauses]
-            values = [query, *parameters, self.fallback_scan_limit]
-            sql = (
-                f"{selected} WHERE {' AND '.join(where)} "
-                "ORDER BY d.document_id,c.sequence LIMIT ?"
-            )
-        rows = self.connection.execute(sql, values).fetchall()
+            rows = fallback_rows()
         if self.fts_available and not rows and any("\u3400" <= character <= "\u9fff" for character in query):
-            fallback_where = ["instr(c.text, ?) > 0", *clauses]
-            fallback_sql = (
-                "SELECT d.payload_json,c.text,c.locator AS chunk_locator "
-                "FROM knowledge_chunks c JOIN knowledge_documents d ON d.document_id=c.document_id "
-                f"WHERE {' AND '.join(fallback_where)} "
-                "ORDER BY d.document_id,c.sequence LIMIT ?"
-            )
-            rows = self.connection.execute(
-                fallback_sql, [query, *parameters, self.fallback_scan_limit]
-            ).fetchall()
+            rows = fallback_rows()
         return [self._hit(row) for row in rows[:limit]]
 
 
@@ -199,6 +196,37 @@ def _document_title(path: Path, text: str) -> str:
                 if title:
                     return title
     return path.stem.replace("_", " ").replace("-", " ")
+
+
+class SensitiveKnowledgeError(ValueError):
+    """A knowledge source contains credential-shaped content."""
+
+
+_SENSITIVE_KEYS = {
+    "apikey", "accesstoken", "token", "password", "secret", "authorization",
+    "privatekey", "clientsecret", "credential", "credentials",
+}
+_SENSITIVE_TEXT = re.compile(
+    r"(?i)(?:sk-[a-z0-9]{20,}|bearer\s+[a-z0-9._-]{12,}|"
+    r"(?:api[_-]?key|access[_-]?token|password|secret|x-amz-signature)\s*[:=]\s*[^\s,;]+)"
+)
+
+
+def _json_contains_sensitive(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if normalized in _SENSITIVE_KEYS or _json_contains_sensitive(item):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_json_contains_sensitive(item) for item in value)
+    return isinstance(value, str) and bool(_SENSITIVE_TEXT.search(value))
+
+
+def _reject_sensitive(value: Any, text: str) -> None:
+    if _json_contains_sensitive(value) or _SENSITIVE_TEXT.search(text):
+        raise SensitiveKnowledgeError("knowledge source contains sensitive credential-shaped content")
 
 
 def index_knowledge(
@@ -242,7 +270,10 @@ def index_knowledge(
                     text = raw.decode("utf-8")
                     if suffix == ".json":
                         payload = json.loads(text)
+                        _reject_sensitive(payload, text)
                         text = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+                    else:
+                        _reject_sensitive(None, text)
                     chunks = (text,)
                     title = _document_title(path, text)
                     publisher = "海淀区 GEP 项目"
@@ -256,6 +287,7 @@ def index_knowledge(
                     chunks = tuple(chunk for chunk in chunks if chunk)
                     if not chunks:
                         raise ValueError("PDF has no extractable text")
+                    _reject_sensitive(None, "\n".join(chunks))
                     metadata = pdf.metadata or {}
                     title = str(metadata.get("/Title") or path.stem)
                     publisher = str(metadata.get("/Author") or "发布者待核验")

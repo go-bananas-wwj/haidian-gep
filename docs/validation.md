@@ -21,3 +21,5 @@
 本地真实浏览器验收的运行时错误为 0，水流动画在 350 ms 观察窗内推进约 367 ms；桌面和 390×844 移动视口无页面横向溢出。右侧抽屉显示 9 个可见章节（工作执行记录为独立可折叠章节，因此完整信息结构为 10 段），标题为“生态系统面积（ecosystem_area）”，包含 1 个来源和 2 个计算步骤。截图保存在 `/home/wwj/GEP/outputs/native-agent-20260929/01-native-agent-graph.png`、`02-native-agent-drawer.png` 和 `03-native-agent-mobile.png`。
 
 当前 Codex 容器的外部 DNS 解析超时，故无密钥 DuckDuckGo 实网请求在本地验收中记录为网络环境失败；搜索解析、原文读取、SSRF 防护、失败降级与已取得证据保留均由受控集成测试覆盖。宿主机 `218.84.111.20:3751` 在当前会话拒绝可用 SSH 身份，线上 9088 部署与宿主机实网搜索仍需在恢复主机认证后完成，不能把本地验收表述为线上部署通过。
+
+合并前最终验证：常规测试 `304 passed, 26 skipped, 8 subtests passed`；独立空间依赖环境测试 `30 passed`（80 条 Rasterio 上游弃用预警，无失败）；`python -m compileall -q gep scripts` 通过。跳过项仍仅为常规环境未安装可选空间依赖，已由独立空间环境覆盖。

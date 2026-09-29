@@ -53,7 +53,7 @@ python -m gep index-knowledge \
 
 AEF 工具只检查 2024 VRT、64 波段、10 m、EPSG:32650、Source Cooperative COG、正式边界、训练标签和验证产物。只有输出栅格哈希与验证记录一致时才返回 ready；当前仅有 VRT/索引时必须返回 research-gap，不得声称已经完成绿地分类。
 
-`GET /tasks/{id}/batch-review-preview` 展示 A、B、research-gap、C、失败和硬阻断；`POST /tasks/{id}/batch-reviews` 在可信代理身份下批量批准当前版本的 A/B 节点。取消整批确认不修改数据并返回逐项队列。research-gap、C、失败和版本冲突不能被批量确认绕过。
+`GET /tasks/{id}/batch-review-preview` 展示 A、B/C 候选、research-gap、D 人工工作包、失败和硬阻断；`POST /tasks/{id}/batch-reviews` 在可信代理身份下，经用户明确选择“忽略逐项审核”后批量批准当前版本的 A/B/C 候选。取消整批确认不修改数据并返回逐项队列。research-gap、D、失败和版本冲突不能被批量确认绕过。
 
 启动时在受限会话中加载该文件，再运行 Compose：
 

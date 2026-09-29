@@ -92,6 +92,8 @@ class KnowledgeBaseTests(unittest.TestCase):
             ))
             hits = knowledge.search("水源涵养", limit=5)
             self.assertEqual([hit["document_id"] for hit in hits], ["doc-water-2024"])
+            outside_scan_window = knowledge.search("碳汇核算", limit=5)
+            self.assertEqual(outside_scan_window, [])
             self.assertFalse(knowledge.fts_available)
         finally:
             knowledge.close()
