@@ -811,8 +811,13 @@ class TaskServiceTests(unittest.TestCase):
         agent.start_run({"run_id": run_id, "task_id": task["task_id"], "node_id": node["node_id"], "status": "complete", "created_utc": "2026-09-29T00:00:00Z"})
         agent.record_tool_run({"tool_run_id": "tool-1", "run_id": run_id, "node_id": node["node_id"], "sequence": 1, "tool_id": "web.search", "status": "ok", "elapsed_ms": 12, "created_utc": "2026-09-29T00:00:01Z"})
         agent.record_evidence({"evidence_id": "evidence-1", "run_id": run_id, "node_id": node["node_id"], "source_id": "official-1", "source_type": "official_web", "risk_tier": "B", "title": "海淀区生态公报", "publisher": "海淀区政府", "url": "https://example.gov.cn/report", "locator": "表 2", "source_sha256": "a" * 64, "checked_utc": "2026-09-29T00:00:02Z", "created_utc": "2026-09-29T00:00:02Z"})
-        agent.record_calculation_step({"step_id": "step-1", "run_id": run_id, "node_id": node["node_id"], "sequence": 1, "formula": "绿色像元 × 100 m2", "substitution": "2304415 × 100", "result_value": 23044.15, "unit": "hm2", "created_utc": "2026-09-29T00:00:03Z"})
+        agent.record_calculation_step({"step_id": "step-1", "run_id": run_id, "node_id": node["node_id"], "sequence": 1, "title": "读取输入 ecosystem_area", "formula": "绿色像元 × 100 m2", "substitution": "2304415 × 100", "result_value": 23044.15, "unit": "hm2", "created_utc": "2026-09-29T00:00:03Z"})
         agent.record_decision({"decision_id": "decision-1", "run_id": run_id, "node_id": node["node_id"], "decision": "candidate", "reason": "official public calculation", "created_utc": "2026-09-29T00:00:04Z"})
+        self.store.connection.execute(
+            "UPDATE nodes SET value_json=?,unit='hm2' WHERE node_id=?",
+            (json.dumps(23044.149999999998), node["node_id"]),
+        )
+        self.store.connection.commit()
 
         detail = self.store.agent_detail(task["task_id"], node["node_id"])
         expected = {
@@ -821,8 +826,14 @@ class TaskServiceTests(unittest.TestCase):
         }
         self.assertTrue(expected <= set(detail))
         self.assertEqual(detail["field"], "ecosystem_area")
+        self.assertIn("生态系统面积（ecosystem_area）", detail["objective"])
+        self.assertNotIn("计算ecosystem_area", detail["objective"])
+        self.assertIn("（", detail["method"]["title"])
+        self.assertIn("23,044.15 hm²", detail["result_interpretation"])
+        self.assertNotIn("23044.149999", detail["result_interpretation"])
         self.assertEqual(detail["tool_timeline"][0]["tool_id"], "web.search")
         self.assertEqual(detail["sources"][0]["title"], "海淀区生态公报")
+        self.assertEqual(detail["steps"][0]["title"], "读取输入 生态系统面积（ecosystem_area）")
         self.assertEqual(detail["steps"][0]["result_value"], 23044.15)
 
     def test_agent_detail_rejects_node_from_another_task(self):

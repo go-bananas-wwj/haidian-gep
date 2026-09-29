@@ -200,7 +200,7 @@ function renderAgentDetail(detail) {
   if (!inputs.children.length) inputs.textContent = "该步骤没有需要展示的底层输入。";
 
   const method = $("#detail-method"); method.replaceChildren();
-  appendLessonRow(method, "方法", detail.method?.method_id || "方法尚待确认", detail.method?.standard_clause || "标准条款待确认");
+  appendLessonRow(method, "方法", detail.method?.title || detail.method?.method_id || "方法尚待确认", detail.method?.standard_clause || "标准条款待确认");
   if (detail.method?.formula) appendLessonRow(method, "公式", detail.method.formula);
   if (detail.method?.reason) { const reason = document.createElement("p"); reason.textContent = detail.method.reason; method.append(reason); }
 

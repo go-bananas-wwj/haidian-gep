@@ -37,8 +37,42 @@ INDICATORS = (
     ("C3", "景观增值", "cultural"),
 )
 INDICATOR_LABELS = {indicator_id: label for indicator_id, label, _category in INDICATORS}
+FIELD_LABELS_ZH = {
+    "ecosystem_area": "生态系统面积", "area": "核算面积", "precipitation": "降水量",
+    "surface_runoff": "地表径流量", "actual_et": "实际蒸散发量", "npp": "净初级生产力",
+    "npp_or_nep": "净初级生产力或净生态系统生产力", "carbon_price": "碳价",
+    "carbon_sequestration_rate": "固碳量", "quantity": "产量", "producer_price": "生产者价格",
+    "visitor_count": "访问人次", "travel_cost": "旅行费用", "travel_time": "旅行时间",
+}
+METHOD_TITLES_ZH = {
+    "worldcover.green_area.v2": "WorldCover 绿色面积估算",
+    "regulating.water_balance.v1": "水量平衡法",
+    "R1.water_balance.demo.v1": "水源涵养水量平衡试算",
+    "R7.oxygen_link.demo.v1": "氧气提供关联换算",
+}
 METHOD_CARDS = {card.indicator_id: card for card in method_cards()}
 SUPPLEMENT_RECOVERY_SECONDS = 300
+
+
+def _display_field(field: str) -> str:
+    label = FIELD_LABELS_ZH.get(field, field)
+    return f"{label}（{field}）" if label != field else label
+
+
+def _display_number(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return str(value)
+    return f"{value:,.4f}".rstrip("0").rstrip(".")
+
+
+def _display_unit(unit: str | None) -> str:
+    return {"hm2": "hm²", "m2": "m²", "km2": "km²", "tCO2/a": "tCO₂/a"}.get(unit or "", unit or "")
+
+
+def _display_method(method_id: str | None) -> str:
+    if not method_id:
+        return "方法尚待确认"
+    return f"{METHOD_TITLES_ZH.get(method_id, '登记核算方法')}（{method_id}）"
 
 
 class ConflictError(ValueError):
@@ -516,7 +550,7 @@ class GepStore:
         elif calculation:
             steps = [{
                 "sequence": index + 1,
-                "title": f"读取输入 {observation.get('metric', index + 1)}",
+                "title": f"读取输入 {_display_field(str(observation.get('metric', index + 1)))}",
                 "value": observation.get("value"),
                 "unit": observation.get("unit"),
                 "source_id": observation.get("observation_id"),
@@ -530,6 +564,16 @@ class GepStore:
                 })
         else:
             steps = []
+        steps = [
+            {
+                **step,
+                "title": (
+                    f"读取输入 {_display_field(step['title'].removeprefix('读取输入 ').strip())}"
+                    if str(step.get("title") or "").startswith("读取输入 ") else step.get("title")
+                ),
+            }
+            for step in steps
+        ]
 
         sources: list[dict[str, Any]] = []
         if audit:
@@ -568,7 +612,11 @@ class GepStore:
         )
         formula = next((step.get("formula") for step in steps if step.get("formula")), None)
         substitution = next((step.get("substitution") for step in steps if step.get("substitution")), None)
-        value_text = "尚未形成数值" if node["value"] is None else f"{node['value']} {node['unit'] or ''}".strip()
+        value_text = (
+            "尚未形成数值" if node["value"] is None
+            else f"{_display_number(node['value'])} {_display_unit(node['unit'])}".strip()
+        )
+        field_display = _display_field(node["label"])
         return {
             "task_id": task_id,
             "node_id": node_id,
@@ -578,12 +626,13 @@ class GepStore:
             "value": node["value"],
             "unit": node["unit"],
             "objective": (
-                f"计算{node['label']}，作为{INDICATOR_LABELS.get(indicator_id, indicator_id or '当前指标')}核算的输入。"
+                f"计算{field_display}，作为{INDICATOR_LABELS.get(indicator_id, indicator_id or '当前指标')}核算的输入。"
                 if node["kind"] == "input" else f"汇总{node['label']}所需数据并判断能否进入核算。"
             ),
             "required_inputs": required_inputs,
             "method": {
                 "method_id": method_id,
+                "title": _display_method(method_id),
                 "formula": formula,
                 "standard_clause": card.standard_clause if card else current.get("standard_clause"),
                 "reason": current.get("explanation") or "按已登记方法和可追溯输入执行。",

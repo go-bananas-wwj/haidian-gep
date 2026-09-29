@@ -166,6 +166,7 @@ class TaskCanvasContractTests(unittest.TestCase):
         self.assertIn('ecosystem_area: "生态系统面积"', labels)
         self.assertIn("fieldLabel", app)
         self.assertIn("taskApi.agentDetail", app)
+        self.assertIn("detail.method?.title", app)
         self.assertIn("agent-detail", api)
         self.assertIn("requestVersion !== drawerRequestVersion", app)
         self.assertNotIn('textContent = evidence.applicability_status', app)
